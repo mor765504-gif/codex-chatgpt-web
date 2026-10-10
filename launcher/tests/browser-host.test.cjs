@@ -3975,3 +3975,63 @@ test("off-on-off fresh conversation changes retire completed history before it c
     assert.equal(fixture.turnTabs.get(manual.id), savedChats ? undefined : manual);
   }
 });
+
+test("reaping a tab without webContents does not throw, and a throwing tab does not block reaping others", async () => {
+  const logs = [];
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    turnTabs: new Map(),
+    logger: {
+      info: () => {},
+      warn: () => {},
+      error: (event, detail) => logs.push([event, detail]),
+    },
+    syncPowerSaveBlocker: () => {},
+    window: { contentView: { removeChildView: () => {} } },
+    view: { webContents: { getURL: () => IDLE_BROWSER_URL } },
+    publishState: () => {},
+    writeDescriptor: () => {},
+    cancelTurn: async () => {},
+    closedTurnOwners: new Map(),
+  });
+
+  const tabMissingWebContents = {
+    id: "tab1",
+    traceId: "trace1",
+    helperPid: 1001,
+    status: "running",
+    bootstrapReady: true,
+    lastHeartbeatAt: 0,
+    view: {}, // missing webContents
+  };
+
+  const tabThrowing = {
+    id: "tab2",
+    get failedAt() { throw new Error("Boom"); },
+    traceId: "trace2",
+    helperPid: 1002,
+    status: "running",
+    bootstrapReady: true,
+    lastHeartbeatAt: 0,
+    view: { webContents: { isDestroyed: () => false, close: () => {} } },
+  };
+
+  const tabNormal = {
+    id: "tab3",
+    traceId: "trace3",
+    helperPid: 1003,
+    status: "running",
+    bootstrapReady: true,
+    lastHeartbeatAt: 0,
+    view: { webContents: { isDestroyed: () => false, close: () => {} } },
+  };
+
+  fixture.turnTabs.set("tab1", tabMissingWebContents);
+  fixture.turnTabs.set("tab2", tabThrowing);
+  fixture.turnTabs.set("tab3", tabNormal);
+
+  await fixture.reapExpiredTurnTabs(100000);
+
+  assert.equal(fixture.turnTabs.has("tab1"), false);
+  assert.equal(fixture.turnTabs.has("tab3"), false);
+  assert.equal(logs.some(([event]) => event === "browser.turn_sweep_failed"), true);
+});
