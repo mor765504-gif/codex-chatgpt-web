@@ -285,6 +285,7 @@ export class LauncherBrowserHelperClient {
             reasoning: turn.reasoning,
             ...(turn.modelFamily ? { modelFamily: turn.modelFamily } : {}),
             capabilities: turn.capabilities,
+            ...(turn.imageOutput ? { imageOutput: turn.imageOutput } : {}),
             ...(turn.nativeConnector ? { nativeConnector: true } : {}),
             ...(turn.prepareResume ? { resumeAvailable: true } : {}),
             ...(turn.retainConversation ? { retainConversation: true } : {}),

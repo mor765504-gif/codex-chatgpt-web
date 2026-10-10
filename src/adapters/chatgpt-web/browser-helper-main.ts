@@ -5,6 +5,7 @@ import type { CodexProviderConfig } from "../../types";
 import { ChatGptBrowserWorker, closeChatGptBrowserWorkers, type BrowserTurn } from "./browser-worker";
 import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError } from "./adapter-error";
 import type { ChatGptWebCapabilities } from "./model";
+import type { ChatGptImageOutputOptions } from "./image-output";
 import { createProcessLineWriter } from "./process-line-writer";
 import { createBrowserHelperPromptSelection } from "./browser-helper-prompt-selection";
 import { isChatGptWebMultipartPartCount, type CompiledChatGptWebPrompt } from "./prompt";
@@ -28,6 +29,7 @@ interface RunMessage {
     reasoning?: string;
     modelFamily?: "5.6" | "6";
     capabilities: ChatGptWebCapabilities;
+    imageOutput?: ChatGptImageOutputOptions;
     nativeConnector?: boolean;
     resumeAvailable?: boolean;
     retainConversation?: boolean;
@@ -222,6 +224,7 @@ async function run(message: RunMessage): Promise<void> {
     reasoning: message.turn.reasoning,
     ...(message.turn.modelFamily ? { modelFamily: message.turn.modelFamily } : {}),
     capabilities: message.turn.capabilities,
+    ...(message.turn.imageOutput ? { imageOutput: message.turn.imageOutput } : {}),
     ...(message.turn.nativeConnector ? { nativeConnector: true } : {}),
     prepare: prepareSelected,
     ...(message.turn.resumeAvailable ? { prepareResume: prepareSelected } : {}),

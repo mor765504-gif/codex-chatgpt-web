@@ -353,6 +353,12 @@ export function createChatGptWebAdapter(
   } = {},
 ): ProviderAdapter {
   const worker = ChatGptBrowserWorker.forProvider(provider);
+  // Experimental opt-in applies only to a deliberately isolated launcher process.
+  // Not suitable as a global production preference.
+  const imageOutputDirectory = process.env.CODEX_CHATGPT_WEB_IMAGE_OUTPUT_DIR?.trim();
+  const experimentalImageOutput = imageOutputDirectory ? {
+    outputDir: imageOutputDirectory, maxImages: 1, minWidth: 512, minHeight: 512,
+  } : undefined;
   const broker = dependencies.broker ?? TurnBroker.forSocket(brokerSocketPath(provider));
   const zeroRiskManualControl = dependencies.zeroRiskManualControl ?? launcherZeroRiskManualControl;
   const structuredBroker = broker instanceof TurnBroker ? broker : undefined;
@@ -707,6 +713,8 @@ export function createChatGptWebAdapter(
         traceId,
         modelId: parsed.modelId,
         reasoning: parsed.options.reasoning,
+        ...(experimentalImageOutput && !parsed._compactionRequest
+          ? { imageOutput: experimentalImageOutput } : {}),
         ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
         capabilities: turnCapabilities,
         prepare: () => prepareWith(checkpointInput.parsed),
@@ -774,6 +782,8 @@ export function createChatGptWebAdapter(
       traceId,
       modelId: parsed.modelId,
       reasoning: parsed.options.reasoning,
+      ...(experimentalImageOutput && !parsed._compactionRequest
+        ? { imageOutput: experimentalImageOutput } : {}),
       ...(parsed._chatgptModelFamily ? { modelFamily: parsed._chatgptModelFamily } : {}),
       capabilities: turnCapabilities,
       prepare: () => prepareWith(checkpointInput.parsed),

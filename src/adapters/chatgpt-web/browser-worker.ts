@@ -87,6 +87,7 @@ import {
 import { LauncherBrowserHelperClient } from "./launcher-helper-client";
 import { assertChatGptModelFamily, selectChatGptModelFamily } from "./model-selection";
 import { MAX_CHATGPT_BROWSER_TABS } from "./concurrency";
+import { captureChatGptAssistantImages, type ChatGptImageOutputOptions } from "./image-output";
 import {
   ChatGptCompactionHandoffAccepted,
   ChatGptWebAdapterError,
@@ -1343,6 +1344,8 @@ export interface BrowserTurn {
   capabilities: ChatGptWebCapabilities;
   prepare: () => Promise<CompiledChatGptWebPrompt & { release: () => void }>;
   prepareResume?: () => Promise<CompiledChatGptWebPrompt & { release: () => void }>;
+  /** Explicit opt-in per image job; ordinary browser turns are unchanged. */
+  imageOutput?: ChatGptImageOutputOptions;
   /** Select the Codex Native connector without advertising the ordinary turn tool environment. */
   nativeConnector?: boolean;
   retainConversation?: boolean;
@@ -1446,12 +1449,13 @@ export function chatGptTurnIsComplete(state: {
   running: boolean;
   currentText: string;
   currentHtml?: string;
+  imageOutputReady?: boolean;
   completionActionVisible: boolean;
 }): boolean {
   return state.responsePresent
     && !state.running
-    && state.currentText.length > 0
-    && state.completionActionVisible;
+    && (state.currentText.length > 0 || state.imageOutputReady === true)
+    && (state.completionActionVisible || state.imageOutputReady === true);
 }
 
 export function chatGptStopButton(page: Page): Locator {
@@ -1674,6 +1678,7 @@ export class ChatGptTurnDomHealthTracker {
     running: boolean;
     currentText: string;
     completionActionVisible: boolean;
+    imageOutputReady?: boolean;
     externalProgressLive?: boolean;
     activityText?: string;
   }, now = Date.now()): string | undefined {
@@ -1699,6 +1704,7 @@ export class ChatGptTurnDomHealthTracker {
     const emptyCompletion = state.responsePresent
       && !state.running
       && state.currentText.length === 0
+      && !state.imageOutputReady
       && state.completionActionVisible;
     if (!emptyCompletion) {
       this.emptyCompletionSince = undefined;
@@ -1711,6 +1717,7 @@ export class ChatGptTurnDomHealthTracker {
 
     const missingCompletionAction = state.responsePresent
       && !state.running
+      && !state.imageOutputReady
       && !state.completionActionVisible;
     if (!missingCompletionAction) {
       this.missingCompletionAction = undefined;
@@ -1779,6 +1786,7 @@ export interface ChatGptVisibleTraceEvent {
 
 interface ChatGptResponseDomSnapshot {
   responsePresent: boolean;
+  imageReady: boolean;
   visibleText: string;
   fullHtml: string;
   markdownSegments: ChatGptMarkdownSegment[];
@@ -1796,6 +1804,7 @@ interface ChatGptResponseDomCache {
 
 const absentResponseDomSnapshot = (): ChatGptResponseDomSnapshot => ({
   responsePresent: false,
+  imageReady: false,
   visibleText: "",
   fullHtml: "",
   markdownSegments: [],
@@ -4763,6 +4772,14 @@ export class ChatGptBrowserWorker {
           visibleText: answerContentRoots.map(markdownText).filter(Boolean).join("\n\n"),
           fullHtml: answerContentRoots.map(candidate => candidate.innerHTML).join(""),
           markdownSegments,
+          // Image widgets can be outside Markdown. Do not rely on localized UI labels.
+          imageReady: [...root.querySelectorAll<HTMLImageElement>("img")].some(img => (
+            (!!img.closest("[data-conversation-role=assistant], [data-message-author-role=assistant]")
+              || !!img.closest("[data-testid=generated-image-gallery], [data-testid=generated-image-preview]"))
+            && !img.closest("[data-conversation-role=user], [data-message-author-role=user], [data-user-message-bubble]")
+            && img.complete && img.naturalWidth >= 512 && img.naturalHeight >= 512
+            && renderedInDom(img)
+          )),
           completionActionVisible: completionAction !== undefined,
           stoppedThinkingVisible,
           traceBlocks,
@@ -4972,6 +4989,9 @@ export class ChatGptBrowserWorker {
     trackUsage = false,
   ): Promise<string> {
     if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
+    if (turn.imageOutput && !this.config.useSavedChats) {
+      throw new Error("image_output_requires_saved_chat: select --saved-chats for experimental image turns");
+    }
     if ((turn.externalProgress !== undefined) !== (turn.completionFence !== undefined)) {
       throw new Error("Tool-capable ChatGPT turns require both progress and terminal-fence transports");
     }
@@ -5601,6 +5621,12 @@ export class ChatGptBrowserWorker {
           continue;
         }
 
+        // An image decode/load can finish without mutating the assistant DOM subtree.
+        // Only bypass snapshot caching for explicitly requested image jobs.
+        if (turn.imageOutput) {
+          responseDomCache.key = undefined;
+          responseDomCache.snapshot = undefined;
+        }
         let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
         if (!snapshot.responsePresent) {
           try {
@@ -5700,6 +5726,7 @@ export class ChatGptBrowserWorker {
             running,
             currentText: snapshot.visibleText,
             completionActionVisible: snapshot.completionActionVisible,
+            imageOutputReady: turn.imageOutput ? snapshot.imageReady : false,
             externalProgressLive,
             activityText: JSON.stringify(snapshot.traceBlocks),
           });
@@ -5709,6 +5736,7 @@ export class ChatGptBrowserWorker {
             running,
             currentText: snapshot.visibleText,
             currentHtml: snapshot.fullHtml,
+            imageOutputReady: turn.imageOutput ? snapshot.imageReady : false,
             completionActionVisible: snapshot.completionActionVisible,
             externalToolCallsInFlight,
           });
@@ -5760,6 +5788,18 @@ export class ChatGptBrowserWorker {
               finalText = completed.answer;
             } else {
               finalText = final.markdown;
+            }
+            if (turn.imageOutput) {
+              // Capture before the browser tab is released. No image means failure.
+              const artifacts = await captureChatGptAssistantImages(
+                responseTurn.locator, turn.traceId, turn.imageOutput,
+              );
+              const artifactSummary = artifacts.map(a =>
+                `Image artifact: ${a.path} (${a.width}x${a.height}, sha256=${a.sha256})`
+              ).join("\n");
+              const suffix = `${finalText ? "\n\n" : ""}${artifactSummary}`;
+              turn.onTextDelta(suffix);
+              finalText += suffix;
             }
             break;
           }
