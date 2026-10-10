@@ -1,0 +1,15 @@
+{
+  "jobs": [
+    {
+      "task_id": "job1",
+      "prompt": "new job",
+      "reference_images": ["ref1.png", "ref2.jpg"]
+    },
+    {
+      "task_id": "job2",
+      "prompt": "edit job",
+      "mode": "edit",
+      "edit_from_task": "job1"
+    }
+  ]
+}

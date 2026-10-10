@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
 import { KeyframePipelineRunner, type PipelineJobSpec } from "../src/adapters/chatgpt-web/pipeline-runner";
-import { resolve } from "node:path";
-import { readFileSync, existsSync } from "node:fs";
+import { resolve, dirname, extname } from "node:path";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 
 async function main() {
   const args = process.argv.slice(2);
   const jsonPath = args[0] ?? resolve("/Users/run176504/.gemini/antigravity/scratch/asli_pro_browser_pack/jobs/shot16/F0036.json");
   const limitArg = args.find(a => a.startsWith("--limit="))?.split("=")[1];
   const delayArg = args.find(a => a.startsWith("--delay="))?.split("=")[1];
+  const resultsArg = args.find(a => a.startsWith("--results="))?.split("=")[1];
 
   let rawJobs: any[] = [];
   if (existsSync(jsonPath)) {
@@ -24,13 +25,102 @@ async function main() {
     process.exit(1);
   }
 
-  const jobs: PipelineJobSpec[] = rawJobs.map((j, idx) => ({
-    task_id: j.task_id ?? `task_${idx + 1}`,
-    prompt: j.prompt,
-    output_dir: j.output_dir ? resolve(process.cwd(), j.output_dir) : undefined,
-    title: j.title,
-    mode: j.mode,
-  }));
+  const jobs: PipelineJobSpec[] = rawJobs.map((j, idx) => {
+    const job: PipelineJobSpec = {
+      task_id: j.task_id ?? `task_${idx + 1}`,
+      prompt: j.prompt,
+      output_dir: j.output_dir ? resolve(process.cwd(), j.output_dir) : undefined,
+      title: j.title,
+      mode: j.mode === "edit" ? "edit" : "new",
+      reference_images: j.reference_images?.map((p: string) => resolve(dirname(jsonPath), p)),
+      edit_source: j.edit_source ? resolve(dirname(jsonPath), j.edit_source) : undefined,
+      edit_from_task: j.edit_from_task,
+      depends_on: j.depends_on ? [...j.depends_on] : [],
+    };
+    if (job.edit_from_task && !job.depends_on.includes(job.edit_from_task)) {
+      job.depends_on.push(job.edit_from_task);
+    }
+    return job;
+  });
+
+  // Validation
+  const taskIds = new Set<string>();
+  const errors: string[] = [];
+  
+  for (const job of jobs) {
+    if (taskIds.has(job.task_id)) {
+      errors.push(`Duplicate task_id: ${job.task_id}`);
+    }
+    taskIds.add(job.task_id);
+
+    const jMode = rawJobs.find(r => r.task_id === job.task_id)?.mode;
+    if (jMode && jMode !== "new" && jMode !== "edit") {
+      errors.push(`Invalid mode for task ${job.task_id}: ${jMode}`);
+    }
+
+    if (job.mode === "edit") {
+      if (job.edit_source && job.edit_from_task) {
+        errors.push(`Task ${job.task_id} has both edit_source and edit_from_task`);
+      }
+      if (!job.edit_source && !job.edit_from_task) {
+        errors.push(`Task ${job.task_id} is in edit mode but has neither edit_source nor edit_from_task`);
+      }
+    }
+
+    const checkImage = (p: string) => {
+      if (!existsSync(p)) {
+        errors.push(`File not found: ${p}`);
+      }
+      const ext = extname(p).toLowerCase();
+      if (![".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
+        errors.push(`Invalid image extension: ${p}`);
+      }
+    };
+
+    if (job.reference_images) {
+      job.reference_images.forEach(checkImage);
+    }
+    if (job.edit_source) {
+      checkImage(job.edit_source);
+    }
+
+    const totalAttachments = (job.reference_images?.length ?? 0) + (job.edit_source || job.edit_from_task ? 1 : 0);
+    if (totalAttachments > 10) {
+      errors.push(`Task ${job.task_id} exceeds 10 attachments limit`);
+    }
+  }
+
+  for (const job of jobs) {
+    if (job.depends_on) {
+      for (const dep of job.depends_on) {
+        if (!taskIds.has(dep)) {
+          errors.push(`Unknown dependency: ${dep} in task ${job.task_id}`);
+        }
+      }
+    }
+  }
+
+  const visit = (taskId: string, path: string[]) => {
+    if (path.includes(taskId)) {
+      errors.push(`Circular dependency: ${path.join(" -> ")} -> ${taskId}`);
+      return;
+    }
+    const job = jobs.find(j => j.task_id === taskId);
+    if (job?.depends_on) {
+      for (const dep of job.depends_on) {
+        visit(dep, [...path, taskId]);
+      }
+    }
+  };
+  for (const job of jobs) {
+    visit(job.task_id, []);
+  }
+
+  if (errors.length > 0) {
+    console.error("Validation failed:");
+    Array.from(new Set(errors)).forEach(e => console.error("- " + e));
+    process.exit(1);
+  }
 
   const runner = new KeyframePipelineRunner({
     concurrencyLimit: limitArg ? parseInt(limitArg, 10) : 5,
@@ -39,6 +129,19 @@ async function main() {
   });
 
   const res = await runner.runBatch(jobs);
+  
+  if (resultsArg) {
+    const resultsPayload = res.results.map(r => ({
+      task_id: r.taskId,
+      success: r.success,
+      error: r.error,
+      outputImages: r.outputImages,
+      depends_on: r.depends_on,
+      mode: r.mode,
+    }));
+    writeFileSync(resolve(process.cwd(), resultsArg), JSON.stringify(resultsPayload, null, 2));
+  }
+
   process.exit(res.failed === 0 ? 0 : 1);
 }
 
