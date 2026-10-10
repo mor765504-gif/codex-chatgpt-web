@@ -394,7 +394,15 @@ class BrowserHost {
     this.homeNavigationTimeout = null;
     this.lastTurnSweepAt = Date.now();
     this.powerSaveBlockerId = null;
-    this.turnLeaseSweep = setInterval(() => { void this.reapExpiredTurnTabs(); }, TURN_HEARTBEAT_SWEEP_MS);
+    this.turnLeaseSweep = setInterval(() => {
+      try {
+        void this.reapExpiredTurnTabs();
+      } catch (error) {
+        this.logger.error("browser.turn_sweep_failed", {
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }, TURN_HEARTBEAT_SWEEP_MS);
     this.turnLeaseSweep.unref?.();
     this.resumeListener = () => this.refreshTurnLeases("system_resume");
     if (powerMonitor && typeof powerMonitor.on === "function") {
@@ -1532,80 +1540,88 @@ class BrowserHost {
       return;
     }
     for (const tab of [...this.turnTabs.values()]) {
-      if (tab.failedAt !== undefined) {
-        if (now - tab.failedAt < RETAINED_TURN_TAB_TTL_MS) continue;
-        this.logger.info("browser.failed_tab_expired", { tabId: tab.id, traceId: tab.traceId });
-        this.removeTurnTab(tab, false);
-        continue;
-      }
-      if (tab.interactionMode === "manual") {
+      try {
+        if (tab.failedAt !== undefined) {
+          if (now - tab.failedAt < RETAINED_TURN_TAB_TTL_MS) continue;
+          this.logger.info("browser.failed_tab_expired", { tabId: tab.id, traceId: tab.traceId });
+          this.removeTurnTab(tab, false);
+          continue;
+        }
+        if (tab.interactionMode === "manual") {
+          if (tab.status === "ready") {
+            if (now - (tab.lastHeartbeatAt ?? 0) < RETAINED_TURN_TAB_TTL_MS) continue;
+            this.logger.info("browser.retained_tab_expired", { tabId: tab.id, traceId: tab.traceId });
+            this.removeTurnTab(tab, false);
+            continue;
+          }
+          if (tab.status === "running" && !processRunning(tab.helperPid)) {
+            this.logger.warn("browser.manual_orphan_turn_reaped", {
+              tabId: tab.id,
+              traceId: tab.traceId,
+              helperPid: tab.helperPid,
+              evidence: "owner_process_exited",
+            });
+            this.signalManualTerminal(tab, "failed");
+            this.removeTurnTab(tab, true);
+          }
+          continue;
+        }
         if (tab.status === "ready") {
           if (now - (tab.lastHeartbeatAt ?? 0) < RETAINED_TURN_TAB_TTL_MS) continue;
           this.logger.info("browser.retained_tab_expired", { tabId: tab.id, traceId: tab.traceId });
           this.removeTurnTab(tab, false);
           continue;
         }
-        if (tab.status === "running" && !processRunning(tab.helperPid)) {
-          this.logger.warn("browser.manual_orphan_turn_reaped", {
-            tabId: tab.id,
-            traceId: tab.traceId,
-            helperPid: tab.helperPid,
-            evidence: "owner_process_exited",
-          });
-          this.signalManualTerminal(tab, "failed");
+        if (tab.status !== "running") continue;
+        const bootstrapExpired = tab.bootstrapReady !== true
+          && now >= (tab.bootstrapDeadlineAt ?? Number.POSITIVE_INFINITY);
+        const heartbeatExpired = tab.bootstrapReady === true
+          && now - (tab.lastHeartbeatAt ?? 0) >= TURN_HEARTBEAT_TIMEOUT_MS;
+        if (!bootstrapExpired && !heartbeatExpired) continue;
+        if (tab.expiryCancellation) {
+          cancellations.push(tab.expiryCancellation);
+          continue;
+        }
+        const evidence = bootstrapExpired ? "browser_surface_bootstrap_timeout" : "helper_heartbeat_expired";
+        const expiredOwner = {
+          tabId: tab.id,
+          traceId: tab.traceId,
+          helperPid: tab.helperPid,
+          evidence,
+        };
+        this.logger.warn("browser.orphan_turn_expired", expiredOwner);
+        if (!this.cancelTurn) {
           this.removeTurnTab(tab, true);
-        }
-        continue;
-      }
-      if (tab.status === "ready") {
-        if (now - (tab.lastHeartbeatAt ?? 0) < RETAINED_TURN_TAB_TTL_MS) continue;
-        this.logger.info("browser.retained_tab_expired", { tabId: tab.id, traceId: tab.traceId });
-        this.removeTurnTab(tab, false);
-        continue;
-      }
-      if (tab.status !== "running") continue;
-      const bootstrapExpired = tab.bootstrapReady !== true
-        && now >= (tab.bootstrapDeadlineAt ?? Number.POSITIVE_INFINITY);
-      const heartbeatExpired = tab.bootstrapReady === true
-        && now - (tab.lastHeartbeatAt ?? 0) >= TURN_HEARTBEAT_TIMEOUT_MS;
-      if (!bootstrapExpired && !heartbeatExpired) continue;
-      if (tab.expiryCancellation) {
-        cancellations.push(tab.expiryCancellation);
-        continue;
-      }
-      const evidence = bootstrapExpired ? "browser_surface_bootstrap_timeout" : "helper_heartbeat_expired";
-      const expiredOwner = {
-        tabId: tab.id,
-        traceId: tab.traceId,
-        helperPid: tab.helperPid,
-        evidence,
-      };
-      this.logger.warn("browser.orphan_turn_expired", expiredOwner);
-      if (!this.cancelTurn) {
-        this.removeTurnTab(tab, true);
-        this.logger.warn("browser.orphan_turn_reaped", expiredOwner);
-        continue;
-      }
-      // Release runtime ownership before destroying its document, just as for an explicit close.
-      // Coalesce overlapping sweeps; a failed control request leaves the lease available for cleanup.
-      const { traceId, helperPid } = tab;
-      tab.expiryCancellation = Promise.resolve().then(async () => {
-        try {
-          await this.cancelTurn(traceId, evidence);
-          if (this.turnTabs.get(tab.id) === tab && tab.traceId === traceId
-            && tab.helperPid === helperPid && tab.status === "running") {
-            this.removeTurnTab(tab, true);
-          }
           this.logger.warn("browser.orphan_turn_reaped", expiredOwner);
-        } catch (error) {
-          this.logger.warn("browser.orphan_turn_cancel_failed", {
-            tabId: tab.id, traceId, evidence, errorType: error?.name || "Error",
-          });
-        } finally {
-          delete tab.expiryCancellation;
+          continue;
         }
-      });
-      cancellations.push(tab.expiryCancellation);
+        // Release runtime ownership before destroying its document, just as for an explicit close.
+        // Coalesce overlapping sweeps; a failed control request leaves the lease available for cleanup.
+        const { traceId, helperPid } = tab;
+        tab.expiryCancellation = Promise.resolve().then(async () => {
+          try {
+            await this.cancelTurn(traceId, evidence);
+            if (this.turnTabs.get(tab.id) === tab && tab.traceId === traceId
+              && tab.helperPid === helperPid && tab.status === "running") {
+              this.removeTurnTab(tab, true);
+            }
+            this.logger.warn("browser.orphan_turn_reaped", expiredOwner);
+          } catch (error) {
+            this.logger.warn("browser.orphan_turn_cancel_failed", {
+              tabId: tab.id, traceId, evidence, errorType: error?.name || "Error",
+            });
+          } finally {
+            delete tab.expiryCancellation;
+          }
+        });
+        cancellations.push(tab.expiryCancellation);
+      } catch (error) {
+        this.logger.error("browser.turn_sweep_failed", {
+          tabId: tab.id,
+          traceId: tab.traceId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
     return Promise.all(cancellations);
   }
@@ -1765,8 +1781,10 @@ class BrowserHost {
       this.closedTurnOwners.set(tab.traceId, tab.helperPid);
       tab.status = "aborted";
     }
-    try { this.window.contentView.removeChildView(tab.view); } catch {}
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    if (tab.view) {
+      try { this.window.contentView.removeChildView(tab.view); } catch {}
+    }
+    if (tab.view?.webContents && !tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     if (this.selectedTabId === tab.id) {
       this.selectedTabId = [...this.turnTabs.keys()].at(-1) || "home";
       const homeContents = this.view?.webContents;
