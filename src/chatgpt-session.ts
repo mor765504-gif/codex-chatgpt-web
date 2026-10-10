@@ -281,7 +281,7 @@ export async function assertNewChatPage(page: Page, useSavedChats = false, proje
   if (useSavedChats && projectUrl) {
     const expected = new URL(projectUrl);
     const prefix = expected.pathname.replace(/\/project\/?$/, "").replace(/\/$/, "");
-    if (url.origin !== expected.origin || !url.pathname.startsWith(prefix)
+    if (url.origin !== expected.origin || !(url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))
       || url.searchParams.get("temporary-chat") === "true") {
       throw new Error(`ChatGPT left the requested new Project surface (${page.url()})`);
     }

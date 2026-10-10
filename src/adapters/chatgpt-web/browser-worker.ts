@@ -2820,7 +2820,7 @@ export class ChatGptBrowserWorker {
     // connector is present in the catalog. Navigating again here destroys that freshly hydrated
     // document and made the first verification race a second SPA bootstrap. A leased turn starts on
     // about:blank and therefore still performs exactly one navigation through this same method.
-    const targetUrl = chatGptNewChatUrl(useSavedChats, this.config.chatgptProjectUrl);
+    const targetUrl = chatGptNewChatUrl(useSavedChats, this.config?.chatgptProjectUrl);
     if (page.url() !== targetUrl) {
       await withBrowserTurnAbort(page.goto(targetUrl, {
         waitUntil: "domcontentloaded",
@@ -2838,7 +2838,7 @@ export class ChatGptBrowserWorker {
     await captureDiagnostic?.("composer-ready");
     await throwIfChatGptSessionFailureAlert(page);
     await assertAuthenticatedChatGptPage(page);
-    await assertNewChatPage(page, useSavedChats, this.config.chatgptProjectUrl);
+    await assertNewChatPage(page, useSavedChats, this.config?.chatgptProjectUrl);
     await captureDiagnostic?.("session-verified");
     return composer;
   }
