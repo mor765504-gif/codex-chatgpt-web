@@ -25,7 +25,7 @@ test("saved chats start empty and cannot reuse an arbitrary conversation or a Te
       goto: async (next: string) => { url = next; navigations.push(next); },
       locator: (selector: string) => selector === CHATGPT_COMPOSER_SELECTOR ? composer : absent,
     };
-    expect(await prepare.call({ activeComposer: async () => composer }, page, undefined, saved)).toBe(composer);
+    expect(await prepare.call({ activeComposer: async () => composer, config: {} }, page, undefined, saved)).toBe(composer);
     expect(navigations).toEqual([chatGptNewChatUrl(saved)]);
     await expect(assertNewChatPage(page, !saved)).rejects.toThrow("requested new");
     url = "https://chatgpt.com/c/previous-task";

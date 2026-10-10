@@ -1442,6 +1442,7 @@ export interface ResolvedBrowserConfig {
   headed: boolean;
   autoApproveToolCalls: boolean;
   useSavedChats: boolean;
+  chatgptProjectUrl?: string;
 }
 
 export function chatGptTurnIsComplete(state: {
@@ -2215,6 +2216,7 @@ export function resolveBrowserConfig(provider: CodexProviderConfig): ResolvedBro
     headed: configured.headed !== false,
     autoApproveToolCalls: configured.autoApproveToolCalls === true,
     useSavedChats: configured.useSavedChats === true,
+    ...(configured.chatgptProjectUrl !== undefined ? { chatgptProjectUrl: configured.chatgptProjectUrl } : {}),
   };
 }
 
@@ -2818,7 +2820,7 @@ export class ChatGptBrowserWorker {
     // connector is present in the catalog. Navigating again here destroys that freshly hydrated
     // document and made the first verification race a second SPA bootstrap. A leased turn starts on
     // about:blank and therefore still performs exactly one navigation through this same method.
-    const targetUrl = chatGptNewChatUrl(useSavedChats);
+    const targetUrl = chatGptNewChatUrl(useSavedChats, this.config.chatgptProjectUrl);
     if (page.url() !== targetUrl) {
       await withBrowserTurnAbort(page.goto(targetUrl, {
         waitUntil: "domcontentloaded",
@@ -2836,7 +2838,7 @@ export class ChatGptBrowserWorker {
     await captureDiagnostic?.("composer-ready");
     await throwIfChatGptSessionFailureAlert(page);
     await assertAuthenticatedChatGptPage(page);
-    await assertNewChatPage(page, useSavedChats);
+    await assertNewChatPage(page, useSavedChats, this.config.chatgptProjectUrl);
     await captureDiagnostic?.("session-verified");
     return composer;
   }
