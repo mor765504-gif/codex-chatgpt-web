@@ -121,6 +121,7 @@ export interface AppConfig {
   experimentalSkillAttachments: boolean;
   experimentalFreshConversationPerTurn: boolean;
   useSavedChats: boolean;
+  chatgptProjectUrl?: string;
   /** Explicitly install the additional Pro-sized model row while Zero Risk is active. */
   zeroRiskProEnabled: boolean;
   /** Optional adapter-silence budget for the Responses watchdog. */
@@ -406,7 +407,7 @@ export function loadConfigForSetup(): AppConfig {
   return parseConfig(raw, path);
 }
 
-function parseConfig(value: unknown, path: string): AppConfig {
+export function parseConfig(value: unknown, path: string): AppConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid configuration object in ${path}`);
   const parsed = value as Partial<AppConfig>;
   if (parsed.version !== 3) throw new Error(`Unsupported configuration version in ${path}; rerun setup to migrate it`);
@@ -557,6 +558,22 @@ function parseConfig(value: unknown, path: string): AppConfig {
     throw new Error(`Invalid useSavedChats in ${path}`);
   }
   const useSavedChats = parsed.useSavedChats === true;
+  if (parsed.chatgptProjectUrl !== undefined) {
+    let valid = false;
+    if (typeof parsed.chatgptProjectUrl === "string") {
+      try {
+        const url = new URL(parsed.chatgptProjectUrl);
+        if (url.origin === "https://chatgpt.com" &&
+            /^\/g\/g-p-[A-Za-z0-9-]+(\/project)?\/?$/.test(url.pathname) &&
+            !url.search && !url.hash) {
+          valid = true;
+        }
+      } catch {}
+    }
+    if (!valid) {
+      throw new Error(`Invalid chatgptProjectUrl in ${path}`);
+    }
+  }
   if (browserInteractionMode === "manual" && experimentalSkillAttachments) {
     throw new Error(`Zero Risk does not support Skills as files in ${path}`);
   }
@@ -642,6 +659,7 @@ export function providerConfig(config: AppConfig): CodexProviderConfig {
       experimentalSkillAttachments: manual ? false : config.experimentalSkillAttachments,
       experimentalFreshConversationPerTurn: !manual && config.experimentalFreshConversationPerTurn === true,
       useSavedChats: config.useSavedChats === true,
+      ...(config.chatgptProjectUrl !== undefined ? { chatgptProjectUrl: config.chatgptProjectUrl } : {}),
       ...(config.stallTimeoutSec !== undefined ? { stallTimeoutSec: config.stallTimeoutSec } : {}),
       autoApproveToolCalls: manual ? false : config.autoApproveToolCalls,
     },

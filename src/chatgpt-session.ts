@@ -4,7 +4,8 @@ import type { ChatGptWebAccountCapabilities } from "./chatgpt-web-models";
 export const CHATGPT_TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
 export const CHATGPT_SAVED_CHAT_URL = "https://chatgpt.com/";
 
-export function chatGptNewChatUrl(useSavedChats = false): string {
+export function chatGptNewChatUrl(useSavedChats = false, projectUrl?: string): string {
+  if (useSavedChats && projectUrl) return projectUrl;
   return useSavedChats ? CHATGPT_SAVED_CHAT_URL : CHATGPT_TEMPORARY_CHAT_URL;
 }
 export const CHATGPT_COMPOSER_SELECTOR = [
@@ -275,12 +276,21 @@ export async function assertTemporaryChatPage(page: Page): Promise<void> {
   await assertNewChatPage(page);
 }
 
-export async function assertNewChatPage(page: Page, useSavedChats = false): Promise<void> {
+export async function assertNewChatPage(page: Page, useSavedChats = false, projectUrl?: string): Promise<void> {
   const url = new URL(page.url());
-  const expected = new URL(chatGptNewChatUrl(useSavedChats));
-  if (url.origin !== expected.origin || url.pathname !== expected.pathname
-    || (url.searchParams.get("temporary-chat") === "true") === useSavedChats) {
-    throw new Error(`ChatGPT left the requested new ${useSavedChats ? "saved" : "Temporary"} Chat surface (${page.url()})`);
+  if (useSavedChats && projectUrl) {
+    const expected = new URL(projectUrl);
+    const prefix = expected.pathname.replace(/\/project\/?$/, "").replace(/\/$/, "");
+    if (url.origin !== expected.origin || !(url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))
+      || url.searchParams.get("temporary-chat") === "true") {
+      throw new Error(`ChatGPT left the requested new Project surface (${page.url()})`);
+    }
+  } else {
+    const expected = new URL(chatGptNewChatUrl(useSavedChats));
+    if (url.origin !== expected.origin || url.pathname !== expected.pathname
+      || (url.searchParams.get("temporary-chat") === "true") === useSavedChats) {
+      throw new Error(`ChatGPT left the requested new ${useSavedChats ? "saved" : "Temporary"} Chat surface (${page.url()})`);
+    }
   }
 }
 
