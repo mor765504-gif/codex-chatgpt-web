@@ -1,16 +1,21 @@
 import { loadConfig, providerConfig } from "../../config";
 import { ChatGptBrowserWorker, type BrowserTurn } from "./browser-worker";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
+import { ChatGptWebPromptImage } from "./prompt";
 
 export interface PipelineJobSpec {
   task_id: string;
-  mode?: string;
+  mode?: "new" | "edit";
   prompt: string;
   output_dir?: string;
   output_basename?: string;
   title?: string;
   timeout_seconds?: number;
+  reference_images?: string[];
+  edit_source?: string;
+  edit_from_task?: string;
+  depends_on?: string[];
 }
 
 export interface PipelineOptions {
@@ -28,6 +33,9 @@ export class KeyframePipelineRunner {
   private concurrencyLimit: number;
   private staggerDelayMs: number;
   private defaultOutputDir: string;
+  
+  // Shared map to track outputs for dependencies
+  private taskOutputs = new Map<string, string[]>();
 
   constructor(options: PipelineOptions = {}) {
     process.env.CODEX_CHATGPT_WEB_BROWSER_HELPER_PROCESS = "1";
@@ -44,6 +52,19 @@ export class KeyframePipelineRunner {
     this.worker = ChatGptBrowserWorker.forProvider(provider);
   }
 
+  private loadAsDataUrl(filePath: string): string {
+    const ext = filePath.split(".").pop()?.toLowerCase();
+    const mimeMap: Record<string, string> = {
+      "png": "image/png",
+      "jpg": "image/jpeg",
+      "jpeg": "image/jpeg",
+      "webp": "image/webp"
+    };
+    const mime = mimeMap[ext || "png"] || "image/png";
+    const base64 = readFileSync(filePath, "base64");
+    return `data:${mime};base64,${base64}`;
+  }
+
   /**
    * 执行单项分镜任务
    */
@@ -52,6 +73,9 @@ export class KeyframePipelineRunner {
     success: boolean;
     result?: string;
     error?: string;
+    outputImages?: string[];
+    depends_on?: string[];
+    mode?: "new" | "edit";
   }> {
     const outDir = job.output_dir ? resolve(job.output_dir) : this.defaultOutputDir;
     const traceId = `${job.task_id.replace(/[^A-Za-z0-9_]/g, "_")}_${Date.now()}`;
@@ -74,11 +98,49 @@ export class KeyframePipelineRunner {
         minWidth: 512,
         minHeight: 512,
       },
-      prepare: async () => ({
-        text: job.prompt,
-        images: [],
-        release: () => {},
-      }),
+      prepare: async () => {
+        let finalPrompt = job.prompt;
+        const images: ChatGptWebPromptImage[] = [];
+
+        // Attach edit source first
+        let editSourcePath = job.edit_source;
+        if (job.mode === "edit" && job.edit_from_task) {
+          const deps = this.taskOutputs.get(job.edit_from_task);
+          if (deps && deps.length > 0) {
+            editSourcePath = deps[0];
+          } else {
+            throw new Error(`dependency failed: ${job.edit_from_task} produced no images`);
+          }
+        }
+        
+        if (editSourcePath) {
+          images.push({
+            ref: "edit_source",
+            imageUrl: this.loadAsDataUrl(editSourcePath)
+          });
+        }
+
+        if (job.reference_images) {
+          job.reference_images.forEach((imgPath, i) => {
+            images.push({
+              ref: `ref_${i}`,
+              imageUrl: this.loadAsDataUrl(imgPath)
+            });
+          });
+        }
+
+        if (job.mode === "edit") {
+          finalPrompt = `the FIRST attached image is the previous keyframe to edit; keep identity, wardrobe, camera, lighting and layout consistent except for the described changes; other attached images are identity references only, never copy their backgrounds.\n\n${job.prompt}`;
+        } else if (job.reference_images && job.reference_images.length > 0) {
+          finalPrompt = `attached images are identity references only.\n\n${job.prompt}`;
+        }
+
+        return {
+          text: finalPrompt,
+          images,
+          release: () => {},
+        };
+      },
       onTextDelta: () => {},
       onSubmitted: () => {
         console.log(`[Pipeline #${index + 1}] 📨 Prompt 已就绪并提交，进入 ChatGPT 生成等待...`);
@@ -94,10 +156,21 @@ export class KeyframePipelineRunner {
     try {
       const result = await this.worker.run(turn);
       console.log(`\n[Pipeline #${index + 1}]  任务成功落地: ${job.task_id}`);
-      return { taskId: job.task_id, success: true, result };
+      
+      let outputImages: string[] = [];
+      const manifestPath = join(outDir, `${traceId}.images.json`);
+      if (existsSync(manifestPath)) {
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        if (manifest.artifacts && Array.isArray(manifest.artifacts)) {
+          outputImages = manifest.artifacts.map((a: any) => a.path);
+        }
+      }
+      this.taskOutputs.set(job.task_id, outputImages);
+      
+      return { taskId: job.task_id, success: true, result, outputImages, depends_on: job.depends_on, mode: job.mode };
     } catch (err: any) {
       console.error(`\n[Pipeline #${index + 1}] ❌ 任务失败: ${job.task_id}: ${err.message || String(err)}`);
-      return { taskId: job.task_id, success: false, error: err.message || String(err) };
+      return { taskId: job.task_id, success: false, error: err.message || String(err), depends_on: job.depends_on, mode: job.mode };
     }
   }
 
@@ -108,7 +181,7 @@ export class KeyframePipelineRunner {
     total: number;
     succeeded: number;
     failed: number;
-    results: Array<{ taskId: string; success: boolean; result?: string; error?: string }>;
+    results: Array<{ taskId: string; success: boolean; result?: string; error?: string; outputImages?: string[]; depends_on?: string[]; mode?: "new" | "edit" }>;
   }> {
     console.log(`\n=======================================================`);
     console.log(`🎬 ASLI 分镜生成错峰流水线调度器启动`);
@@ -117,34 +190,87 @@ export class KeyframePipelineRunner {
     console.log(`- 并发租约上限: ${this.concurrencyLimit}`);
     console.log(`=======================================================\n`);
 
-    const results: Array<{ taskId: string; success: boolean; result?: string; error?: string }> = [];
-    const activePromises: Set<Promise<any>> = new Set();
+    const results: Array<{ taskId: string; success: boolean; result?: string; error?: string; outputImages?: string[]; depends_on?: string[]; mode?: "new" | "edit" }> = [];
+    const taskStatus = new Map<string, { success: boolean, error?: string }>();
+    this.taskOutputs.clear();
 
-    for (let i = 0; i < jobs.length; i++) {
-      const job = jobs[i];
+    const pendingJobs = [...jobs];
+    const activePromises = new Set<Promise<void>>();
+    let runningCount = 0;
+    
+    // To simulate original delay on first start, wait before returning? No, stagger.
+    
+    // Helper to evaluate dependencies
+    const hasFailedDeps = (job: PipelineJobSpec) => {
+      if (!job.depends_on) return false;
+      return job.depends_on.some(dep => taskStatus.has(dep) && !taskStatus.get(dep)!.success);
+    };
 
-      // 若活跃任务已达到并发上限，等待最早结束的一个
-      if (activePromises.size >= this.concurrencyLimit) {
-        await Promise.race(activePromises);
+    const getFailedDep = (job: PipelineJobSpec) => {
+      if (!job.depends_on) return undefined;
+      return job.depends_on.find(dep => taskStatus.has(dep) && !taskStatus.get(dep)!.success);
+    };
+
+    const isReady = (job: PipelineJobSpec) => {
+      if (!job.depends_on) return true;
+      return job.depends_on.every(dep => taskStatus.has(dep) && taskStatus.get(dep)!.success);
+    };
+
+    while (pendingJobs.length > 0 || activePromises.size > 0) {
+      let startedAny = false;
+      
+      // Process pending jobs
+      for (let i = 0; i < pendingJobs.length; i++) {
+        const job = pendingJobs[i];
+        
+        if (hasFailedDeps(job)) {
+          const failedDep = getFailedDep(job);
+          const errorMsg = `dependency failed: ${failedDep}`;
+          console.error(`[Scheduler] ❌ 任务 ${job.task_id} 因依赖项失败而取消 (${errorMsg})`);
+          taskStatus.set(job.task_id, { success: false, error: errorMsg });
+          results.push({ taskId: job.task_id, success: false, error: errorMsg, depends_on: job.depends_on, mode: job.mode });
+          pendingJobs.splice(i, 1);
+          i--;
+          continue;
+        }
+
+        if (isReady(job) && activePromises.size < this.concurrencyLimit) {
+          // Find original index for logging
+          const index = jobs.indexOf(job);
+          pendingJobs.splice(i, 1);
+          i--;
+          
+          const p = (async () => {
+             const res = await this.runSingle(job, index);
+             results.push({ ...res, mode: job.mode ?? 'new', depends_on: job.depends_on ?? [] });
+             taskStatus.set(job.task_id, { success: res.success, error: res.error });
+          })();
+          
+          activePromises.add(p);
+          p.finally(() => activePromises.delete(p));
+          startedAny = true;
+          
+          if (activePromises.size >= this.concurrencyLimit) {
+             break; // Stop taking jobs until one finishes
+          }
+          
+          // Original logic staggered launches
+          if (pendingJobs.length > 0) {
+            console.log(`[Scheduler] ⏳ 错峰等待 ${this.staggerDelayMs}ms，平滑进入下一标签页...`);
+            await new Promise(r => setTimeout(r, this.staggerDelayMs));
+          }
+        }
       }
-
-      // 发起当前任务
-      const taskPromise = this.runSingle(job, i).then(res => {
-        results.push(res);
-        activePromises.delete(taskPromise);
-        return res;
-      });
-      activePromises.add(taskPromise);
-
-      // 如果还有后续任务，执行错峰等待（让当前页面完成 SPA 导航与 Prompt 提交）
-      if (i < jobs.length - 1) {
-        console.log(`[Scheduler] ⏳ 错峰等待 ${this.staggerDelayMs}ms，平滑进入下一标签页...`);
-        await new Promise(r => setTimeout(r, this.staggerDelayMs));
+      
+      // If no job was ready or we're at limit, wait for an active promise
+      if (!startedAny && activePromises.size > 0) {
+        await Promise.race(activePromises);
+      } else if (!startedAny && pendingJobs.length > 0) {
+        // Deadlock? Should not happen if validation prevented cycles, but break to avoid infinity
+        console.error("Scheduler deadlocked (circular dependencies bypass check?).");
+        break;
       }
     }
-
-    // 等待所有在途任务收敛完成
-    await Promise.all(activePromises);
 
     const succeeded = results.filter(r => r.success).length;
     const failed = results.length - succeeded;

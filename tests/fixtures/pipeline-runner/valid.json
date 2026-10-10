@@ -1,0 +1,17 @@
+{
+  "jobs": [
+    {
+      "task_id": "t1",
+      "prompt": "hello",
+      "mode": "new",
+      "reference_images": ["img.png"]
+    },
+    {
+      "task_id": "t2",
+      "prompt": "edit",
+      "mode": "edit",
+      "edit_from_task": "t1",
+      "reference_images": ["img.jpg"]
+    }
+  ]
+}
