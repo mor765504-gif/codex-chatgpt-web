@@ -4,14 +4,7 @@ import { loadConfig, providerConfig } from "../src/config";
 import { resolve, dirname, extname } from "node:path";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 
-async function main() {
-  const args = process.argv.slice(2);
-  const jsonPath = args[0] ?? resolve("/Users/run176504/.gemini/antigravity/scratch/asli_pro_browser_pack/jobs/shot16/F0036.json");
-  const limitArg = args.find(a => a.startsWith("--limit="))?.split("=")[1];
-  const delayArg = args.find(a => a.startsWith("--delay="))?.split("=")[1];
-  const resultsArg = args.find(a => a.startsWith("--results="))?.split("=")[1];
-  const reasoningArg = args.find(a => a.startsWith("--reasoning="))?.slice("--reasoning=".length);
-
+export function loadAndValidatePipelineJobs(jsonPath: string, reasoningArg?: string): { jobs: PipelineJobSpec[]; errors: string[] } {
   let rawJobs: any[] = [];
   if (existsSync(jsonPath)) {
     const parsed = JSON.parse(readFileSync(jsonPath, "utf-8"));
@@ -23,14 +16,14 @@ async function main() {
       rawJobs = [parsed];
     }
   } else {
-    console.error(`File not found: ${jsonPath}`);
-    process.exit(1);
+    throw new Error(`File not found: ${jsonPath}`);
   }
 
   const jobs: PipelineJobSpec[] = rawJobs.map((j, idx) => {
     const job = {
       task_id: j.task_id ?? `task_${idx + 1}`,
       prompt: j.prompt,
+      ...(typeof j.raw_prompt === "boolean" ? { raw_prompt: j.raw_prompt } : {}),
       // Only omission uses the default; explicit null/empty values must fail validation.
       reasoning: j.reasoning !== undefined ? j.reasoning : reasoningArg ?? "low",
       output_dir: j.output_dir ? resolve(process.cwd(), j.output_dir) : undefined,
@@ -73,7 +66,11 @@ async function main() {
     validateReasoning(reasoningArg, "--reasoning");
   }
   
-  for (const job of jobs) {
+  for (const [idx, job] of jobs.entries()) {
+    const rawPrompt = rawJobs[idx].raw_prompt;
+    if (rawPrompt !== undefined && typeof rawPrompt !== "boolean") {
+      errors.push(`Invalid raw_prompt for task ${job.task_id}: ${JSON.stringify(rawPrompt)} (expected boolean)`);
+    }
     validateReasoning(job.reasoning, `reasoning for task ${job.task_id}`);
     if (taskIds.has(job.task_id)) {
       errors.push(`Duplicate task_id: ${job.task_id}`);
@@ -143,6 +140,24 @@ async function main() {
     visit(job.task_id, []);
   }
 
+  return { jobs, errors };
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const jsonPath = args[0] ?? resolve("/Users/run176504/.gemini/antigravity/scratch/asli_pro_browser_pack/jobs/shot16/F0036.json");
+  const limitArg = args.find(a => a.startsWith("--limit="))?.split("=")[1];
+  const delayArg = args.find(a => a.startsWith("--delay="))?.split("=")[1];
+  const resultsArg = args.find(a => a.startsWith("--results="))?.split("=")[1];
+  const reasoningArg = args.find(a => a.startsWith("--reasoning="))?.slice("--reasoning=".length);
+
+  if (!existsSync(jsonPath)) {
+    console.error(`File not found: ${jsonPath}`);
+    process.exit(1);
+  }
+
+  const { jobs, errors } = loadAndValidatePipelineJobs(jsonPath, reasoningArg);
+
   if (errors.length > 0) {
     console.error("Validation failed:");
     Array.from(new Set(errors)).forEach(e => console.error("- " + e));
@@ -173,7 +188,9 @@ async function main() {
   process.exit(res.failed === 0 ? 0 : 1);
 }
 
-main().catch(err => {
-  console.error("Pipeline failure:", err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch(err => {
+    console.error("Pipeline failure:", err);
+    process.exit(1);
+  });
+}

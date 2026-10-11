@@ -31,6 +31,10 @@ bun run scripts/run-apt-image.ts
 bun run scripts/run-pipeline.ts /path/to/jobs.json --limit=5 --delay=12000
 ```
 
+### 任务字段：`raw_prompt`
+
+`PipelineJobSpec.raw_prompt` 是可选布尔字段。设为 `true` 时，调度器原样发送 `prompt`（保留空格和换行），不添加任何自动前置说明，适用于需要按场景参考图还原房间或背景的任务。省略或设为 `false` 时，保持既有行为：edit 任务添加首图编辑及身份参考说明，带参考图的 new 任务添加身份参考说明。该字段不改变附件顺序：`edit_source`（或 `edit_from_task` 的首张产物）在前，`reference_images` 按数组顺序在后。
+
 ### 单元测试
 ```bash
 bun test tests/chatgpt-web-image-output.test.ts

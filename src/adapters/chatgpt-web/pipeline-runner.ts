@@ -8,6 +8,8 @@ export interface PipelineJobSpec {
   task_id: string;
   mode?: "new" | "edit";
   prompt: string;
+  /** Send prompt verbatim without automatic attachment instructions. */
+  raw_prompt?: boolean;
   reasoning?: "low" | "medium" | "high" | "xhigh" | "max";
   output_dir?: string;
   output_basename?: string;
@@ -132,10 +134,12 @@ export class KeyframePipelineRunner {
           });
         }
 
-        if (job.mode === "edit") {
-          finalPrompt = `the FIRST attached image is the previous keyframe to edit; keep identity, wardrobe, camera, lighting and layout consistent except for the described changes; other attached images are identity references only, never copy their backgrounds.\n\n${job.prompt}`;
-        } else if (job.reference_images && job.reference_images.length > 0) {
-          finalPrompt = `attached images are identity references only.\n\n${job.prompt}`;
+        if (job.raw_prompt !== true) {
+          if (job.mode === "edit") {
+            finalPrompt = `the FIRST attached image is the previous keyframe to edit; keep identity, wardrobe, camera, lighting and layout consistent except for the described changes; other attached images are identity references only, never copy their backgrounds.\n\n${job.prompt}`;
+          } else if (job.reference_images && job.reference_images.length > 0) {
+            finalPrompt = `attached images are identity references only.\n\n${job.prompt}`;
+          }
         }
 
         return {
