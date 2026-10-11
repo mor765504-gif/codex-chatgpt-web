@@ -1,9 +1,10 @@
 import { expect, test, describe, mock, beforeEach, afterEach } from "bun:test";
 import { KeyframePipelineRunner, type PipelineJobSpec } from "../src/adapters/chatgpt-web/pipeline-runner";
+import type { BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { resolve, join, dirname } from "node:path";
 import * as fs from "node:fs";
 
-let mockRun = mock(() => Promise.resolve("mocked_result"));
+let mockRun = mock((turn: BrowserTurn) => Promise.resolve("mocked_result"));
 
 mock.module("../src/adapters/chatgpt-web/browser-worker", () => {
   return {

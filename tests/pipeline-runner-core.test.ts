@@ -6,6 +6,22 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 describe("KeyframePipelineRunner", () => {
   const outDir = join(__dirname, "fixtures/pipeline-runner/out");
 
+  test("runSingle defaults omitted reasoning to low", async () => {
+    const runner = new KeyframePipelineRunner({ defaultOutputDir: outDir });
+    let reasoning: string | undefined;
+    runner["worker"] = {
+      run: async (turn: any) => {
+        reasoning = turn.reasoning;
+        return "success";
+      },
+    } as any;
+
+    const result = await runner.runSingle({ task_id: "default", prompt: "draw" }, 0);
+    expect(result.success).toBe(true);
+    expect(reasoning).toBe("low");
+    expect(result.reasoning).toBe("low");
+  });
+
   test("runs tasks respecting dependencies and staggering", async () => {
     mkdirSync(outDir, { recursive: true });
 

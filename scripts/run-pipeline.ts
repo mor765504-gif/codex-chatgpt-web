@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { KeyframePipelineRunner, type PipelineJobSpec } from "../src/adapters/chatgpt-web/pipeline-runner";
+import { loadConfig, providerConfig } from "../src/config";
 import { resolve, dirname, extname } from "node:path";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 
@@ -9,6 +10,7 @@ async function main() {
   const limitArg = args.find(a => a.startsWith("--limit="))?.split("=")[1];
   const delayArg = args.find(a => a.startsWith("--delay="))?.split("=")[1];
   const resultsArg = args.find(a => a.startsWith("--results="))?.split("=")[1];
+  const reasoningArg = args.find(a => a.startsWith("--reasoning="))?.slice("--reasoning=".length);
 
   let rawJobs: any[] = [];
   if (existsSync(jsonPath)) {
@@ -26,9 +28,11 @@ async function main() {
   }
 
   const jobs: PipelineJobSpec[] = rawJobs.map((j, idx) => {
-    const job: PipelineJobSpec = {
+    const job = {
       task_id: j.task_id ?? `task_${idx + 1}`,
       prompt: j.prompt,
+      // Only omission uses the default; explicit null/empty values must fail validation.
+      reasoning: j.reasoning !== undefined ? j.reasoning : reasoningArg ?? "low",
       output_dir: j.output_dir ? resolve(process.cwd(), j.output_dir) : undefined,
       title: j.title,
       mode: j.mode === "edit" ? "edit" : "new",
@@ -36,7 +40,7 @@ async function main() {
       edit_source: j.edit_source ? resolve(dirname(jsonPath), j.edit_source) : undefined,
       edit_from_task: j.edit_from_task,
       depends_on: j.depends_on ? [...j.depends_on] : [],
-    };
+    } satisfies PipelineJobSpec;
     if (job.edit_from_task && !job.depends_on.includes(job.edit_from_task)) {
       job.depends_on.push(job.edit_from_task);
     }
@@ -46,8 +50,31 @@ async function main() {
   // Validation
   const taskIds = new Set<string>();
   const errors: string[] = [];
+  const reasoningLevels = ["low", "medium", "high", "xhigh", "max"];
+  let supportedReasoning: string[] = [];
+  try {
+    const provider = providerConfig(loadConfig());
+    supportedReasoning = provider.defaultModel
+      ? provider.modelReasoningEfforts?.[provider.defaultModel] ?? []
+      : [];
+  } catch (err) {
+    errors.push(`Cannot validate reasoning configuration: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  const validateReasoning = (value: unknown, label: string) => {
+    if (typeof value !== "string" || !reasoningLevels.includes(value)) {
+      errors.push(`Invalid ${label}: ${JSON.stringify(value)} (expected ${reasoningLevels.join(", ")})`);
+    } else if (!supportedReasoning.includes(value)) {
+      errors.push(`Unsupported ${label}: ${value} (configured levels: ${supportedReasoning.join(", ") || "none"})`);
+    }
+  };
+
+  if (reasoningArg !== undefined) {
+    validateReasoning(reasoningArg, "--reasoning");
+  }
   
   for (const job of jobs) {
+    validateReasoning(job.reasoning, `reasoning for task ${job.task_id}`);
     if (taskIds.has(job.task_id)) {
       errors.push(`Duplicate task_id: ${job.task_id}`);
     }
@@ -134,6 +161,7 @@ async function main() {
     const resultsPayload = res.results.map(r => ({
       task_id: r.taskId,
       success: r.success,
+      reasoning: r.reasoning,
       error: r.error,
       outputImages: r.outputImages,
       depends_on: r.depends_on,
