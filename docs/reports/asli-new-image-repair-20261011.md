@@ -223,3 +223,78 @@ claim, content-quality claim, old-image substitution or native-image replacement
 This public report contains no private Project URL, full production prompt,
 configuration/session content or image payload. Private evidence is referenced by
 its specific evidence filenames only.
+
+## C1 incremental BLUEPRINT — chain-r2 observation timeout
+
+New fixed baseline: `ef3fbaa2e6c2998d8a6da6fa77a1e27eebf0aa74`, clean before
+incremental edits, same sole writer/worktree. Current routing: Desktop T0
+`01a12a54-0f7a-76e2-b803-982a780d3b34`; root relay
+`01a12a3f-ef11-74e1-8162-dcc878375e25`. The prior T0 is retired.
+
+Read only the owner's exact `chain-r2-timeout-evidence.json` packet and retained
+`16-turn-failed.json`. Send was accepted, response-visible was recorded, Stop was
+still present at local failure and no generation-failure UI was observed. The
+diagnostic retains error/call log but no JavaScript stack. This is post-submission
+observation failure; it does not establish a provider failure or whether a readable
+PNG later existed. The original owner separately handles existing-turn readback.
+
+Current runtime call-path evidence: the base response evaluate catches its error
+and returns an absent snapshot; new-tool checks happen before Send; the second
+image-inspection evaluate uses 2000ms and escapes the base observation catch into
+terminal turn failure. These boundaries identify the exposed image-inspection
+caller as the supported inference, not a captured-stack fact.
+
+Primary references checked first: [Playwright locator.evaluate](https://playwright.dev/docs/api/class-locator#locator-evaluate)
+describes locator-wait timeout separately from execution after resolution.
+[Upstream #686](https://github.com/miuuyy/codex-chatgpt-web/issues/686) documents
+same-turn DOM replacement/ownership reconciliation, already present locally.
+[#302](https://github.com/miuuyy/codex-chatgpt-web/issues/302) concerns a different
+Send-press phase; its timeout-budget proposal is not transplanted here.
+
+Minimal write set: `browser-worker.ts`, its direct contract tests, and this report.
+Only a native Playwright TimeoutError from the optional image inspection becomes
+an unavailable current observation, with both cached key and snapshot discarded.
+The existing accepted-turn binding recovery and finite DOM-health grace handle the
+next observation. Closed page, cancellation and other errors still fail. No local
+capture/persistence changes, provider retry, Send, global timeout/default/config
+change, active-runtime patch, or second writer/controller.
+
+RED → GREEN: execute the actual DOM callbacks with a timeout injected only on the
+second inspection; prove the accepted snapshot cannot return stale image success,
+then the next observation on the same bound turn can recover. Cover closed page,
+abort and non-timeout errors separately. Run only affected browser observation
+contracts and typecheck; do not repeat the unchanged 50/61 suites.
+
+Runtime apply remains root's phase gate. Original UI owner alone reads/captures the
+existing submitted turn; this writer does not re-submit or operate that lease.
+C1 checks and review receipt: READY FOR ROOT REVIEW; source/tests frozen.
+
+RED at fixed baseline: 1 pass / 2 fail in the three new observation contracts;
+the raw inspection timeout escaped and closed-page timeout lacked the existing
+terminal cancellation classification. GREEN after the narrow catch: 10 pass /
+0 fail / 146 unrelated filtered, covering the new contracts plus directly affected
+image readiness, accepted-turn binding, closure and finite DOM-health behavior.
+Final typecheck exit 0; diff check exit 0; source and direct test byte-equal with
+the new verification snapshot. Previous immutable acceptance snapshots were not
+modified. The unchanged 50/61 suites were not repeated.
+
+Exact verification snapshot: `/Users/run176504/.codex/tmp/e04-chain-r2-observation-G8Vl2l`.
+Existing runtime dependencies are reused read-only. Exact commands:
+
+```sh
+cd /Users/run176504/.codex/tmp/e04-chain-r2-observation-G8Vl2l
+bun test tests/browser-worker-contract.test.ts -t 'image inspection|image-job snapshot|assistant tracking rebinds|browser DOM health fails closed|visible generation suspends|idle empty response|closing the launcher page|clearing the missing-response window'
+bun /Users/run176504/.gemini/antigravity/scratch/codex-chatgpt-web/node_modules/typescript/bin/tsc --project tsconfig.json --noEmit
+```
+
+Reviewable product delta: one narrow catch in `browser-worker.ts` (16 added lines,
+one replaced line), three direct regression contracts plus DOM fixture (51 lines)
+in `browser-worker-contract.test.ts`, and this public report append only. No other
+source/test/report changes, no runtime apply, no Git mutation/publication by writer.
+
+Provider/output conclusion remains separate: the owner reports the new anchor and
+nine successful targets; F0517 had provider activity at local observer failure.
+This patch does not prove that task's final PNG exists or was recovered. Sole UI
+owner continues existing-turn capture independently. Root may review/back up/apply
+only this incremental delta at its phase gate; it must not overwrite unrelated or
+active runtime work. No additional writer or blind resubmission is introduced.

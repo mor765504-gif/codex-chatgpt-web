@@ -116,6 +116,57 @@ test("image-job snapshot uses current generated widgets and exposes failure UI w
   }
 });
 
+// Actual page callbacks; the only injected fault is the second image inspection.
+function imageInspectionFaultFixture(fault: Error, closed = false) {
+  const {createWindow} = require("@mixmark-io/domino");
+  const window = createWindow('<article id="bound" data-message-author-role="assistant"><div data-testid="generated-image-gallery"><img></div><button data-testid="copy-turn-action-button">Copy</button></article>');
+  for (const prototype of [window.document.querySelectorAll("img"),window.document.body.children].map(Object.getPrototypeOf)) {
+    Object.defineProperty(prototype,Symbol.iterator,{configurable:true,value:Array.prototype[Symbol.iterator]});
+  }
+  Object.defineProperties(window.document.querySelector("img"),{complete:{value:true},naturalWidth:{value:1672},naturalHeight:{value:941}});
+  const context = createContext({document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,
+    Node:window.Node,NodeFilter:window.NodeFilter,performance:{timeOrigin:1},
+    getComputedStyle:()=>({display:"block",visibility:"visible",opacity:"1"}),MutationObserver:class {observe(){}},
+  });
+  let evaluations = 0;
+  const locator = {
+    evaluate:async(callback:Function, options:unknown)=>{
+      if (++evaluations === 2) throw fault;
+      return runInContext(`(${callback.toString()})`,context)(window.document.getElementById("bound"),options);
+    },
+    page:()=>({isClosed:()=>closed}),
+  };
+  const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+  const cache = {} as {key?:string;snapshot?:unknown};
+  const read = ()=>worker.responseDomSnapshot(locator,cache,{outputDir:"/tmp/not-written-image-inspection"});
+  return {read,cache};
+}
+
+test("image inspection timeout discards a ready cached projection and the same bound turn recovers next read", async () => {
+  const {errors} = require("playwright-core");
+  const fixture = imageInspectionFaultFixture(new errors.TimeoutError("evaluate: Timeout 2000ms exceeded"));
+  const unavailable = await fixture.read();
+  expect(unavailable.responsePresent).toBeFalse();
+  expect(unavailable.imageReady).toBeFalse();
+  expect(fixture.cache.key).toBeUndefined();
+  expect(fixture.cache.snapshot).toBeUndefined();
+  const recovered = await fixture.read();
+  expect(recovered.responsePresent).toBeTrue();
+  expect(recovered.imageReady).toBeTrue();
+});
+
+test("image inspection still propagates abort and non-timeout errors", async () => {
+  for (const fault of [new DOMException("cancelled","AbortError"),new Error("unexpected inspection error")]) {
+    await expect(imageInspectionFaultFixture(fault).read()).rejects.toBe(fault);
+  }
+});
+
+test("image inspection timeout on a closed page remains an immediate terminal error", async () => {
+  const {errors} = require("playwright-core");
+  await expect(imageInspectionFaultFixture(new errors.TimeoutError("evaluate: Timeout 2000ms exceeded"),true).read())
+    .rejects.toMatchObject({code:"client_cancelled",retryable:false});
+});
+
 test("new image preparation selects the observed entry before attaching verbatim prompt; edit/chat never select it", async () => {
   const attach = (ChatGptBrowserWorker.prototype as any).attachPrompt;
   const {createWindow} = require("@mixmark-io/domino");

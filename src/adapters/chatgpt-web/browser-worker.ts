@@ -4965,7 +4965,21 @@ export class ChatGptBrowserWorker {
       .map(stripChatGptTraceControlSuffix)
       .filter(block => block.text.length > 0 && !isChatGptTraceControl(block));
     if (imageOutput && snapshot.responsePresent) {
-      const images = await inspectChatGptAssistantImages(responseTurn, imageOutput);
+      let images;
+      try {
+        images = await inspectChatGptAssistantImages(responseTurn, imageOutput);
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
+        if (responseTurn.page().isClosed()) throw chatGptBrowserTabClosedError();
+        // The accepted turn can be replaced between the text and image observations.
+        // Re-enter existing binding/grace handling; never deliver the earlier projection
+        // as current image evidence or turn an observation gap into a new Send.
+        if (cache) {
+          cache.key = undefined;
+          cache.snapshot = undefined;
+        }
+        return absentResponseDomSnapshot();
+      }
       snapshot.imageReady = images.readyCount > 0;
       snapshot.imageFailureUiVisible = images.failureUiVisible;
     }
