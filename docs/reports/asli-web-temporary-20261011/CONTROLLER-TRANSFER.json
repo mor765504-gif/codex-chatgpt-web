@@ -1,0 +1,13 @@
+{
+  "recorded_at": "2026-10-11T09:41:34.513495+00:00",
+  "source": "direct user instruction in this executor chat",
+  "state": "TRANSFERRED",
+  "sole_t0": "01a12a54-0f7a-76e2-b803-982a780d3b34",
+  "route_handoff_to_mill": "01a12a32-9de5-7a40-aa8d-2603e917dabf",
+  "scope": "original task-private Temporary17842 and official AGY CLI only; no shared bridge/global credentials/Zeno source changes",
+  "probe_evidence_preserved": [
+    "verification.json",
+    "agy-verification.json"
+  ],
+  "publication_owner": "new T0/root"
+}

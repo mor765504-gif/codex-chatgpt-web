@@ -1,0 +1,12 @@
+{
+  "installed_at": "2026-10-11T09:22:08.723858+00:00",
+  "platform": "darwin_arm64",
+  "manifest_version": "1.3.3",
+  "official_payload_sha512_verified": true,
+  "payload_sha512": "05ebb472149ca461e99f7870ce81fbdd48e3844f43b96a778c981d983421627c5bd02596dc8211ccd30b4cee0df8ca4d17b681f587ef22948ea4c703e9c7fcbd",
+  "binary": "/Users/run176504/.control-plane/lanes/asli-t0-20261011/web-temporary/private/bin/agy",
+  "shell_settings_changed": false,
+  "global_settings_changed": false,
+  "security_permissions_changed": false,
+  "installer_note": "Official manifest/download/SHA512/native payload steps reused; skip install subcommand that edits shell profiles. No quarantine bypass."
+}

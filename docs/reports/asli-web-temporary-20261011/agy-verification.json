@@ -1,0 +1,21 @@
+{
+  "started_at": "2026-10-11T09:27:36.216538+00:00",
+  "requested_model": "gemini-3.8-flash-medium",
+  "requested_effort": "medium",
+  "nonce": "AGY_MEDIUM_f241048dae1f",
+  "source": "official CLI 1.3.3",
+  "sandbox": true,
+  "completed_at": "2026-10-11T09:27:43.720578+00:00",
+  "exit_code": 0,
+  "init_model": "gemini-3.8-flash-medium",
+  "init_cid": "e0a9bed7-d6c6-4748-81a8-9287507f1f50",
+  "result_cid": "e0a9bed7-d6c6-4748-81a8-9287507f1f50",
+  "result_status": "SUCCESS",
+  "reply": "AGY_MEDIUM_f241048dae1f",
+  "permission_mode": "request-review",
+  "duration_seconds": 2.23524,
+  "error": null,
+  "nonce_match": true,
+  "cid_match": true,
+  "status": "PASS"
+}

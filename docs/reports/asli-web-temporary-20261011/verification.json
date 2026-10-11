@@ -1,0 +1,153 @@
+{
+  "route_id": "asli-t0-web-temporary-17842-20261011",
+  "started_at": "2026-10-11T09:21:29.626019+00:00",
+  "configured_surface": "Temporary",
+  "endpoint": "http://127.0.0.1:17842/v1",
+  "engine_baseline": "32459ee4e61002265e182a0b89ec033e9dcf7138",
+  "requested_model": "chatgpt-web/extra-high",
+  "requested_web_effort": "xhigh",
+  "capacity": "unknown",
+  "preexisting_project_count": 0,
+  "new_targets": [
+    {
+      "target_id": "3B5BC97EA5157B95FD2C6AC861F98907",
+      "temporary": true,
+      "saved": false,
+      "project": false,
+      "origin": "https://chatgpt.com",
+      "observed_at": "2026-10-11T09:22:09.487271+00:00"
+    },
+    {
+      "target_id": "DEC5007D78181F974C48F415E3B734E5",
+      "temporary": false,
+      "saved": false,
+      "project": true,
+      "origin": "https://chatgpt.com",
+      "observed_at": "2026-10-11T09:22:26.186359+00:00"
+    },
+    {
+      "target_id": "A84200E2DA3B77A42693AE7F83A8671F",
+      "temporary": false,
+      "saved": false,
+      "project": false,
+      "origin": "https://chatgpt.com",
+      "observed_at": "2026-10-11T09:22:57.822716+00:00"
+    },
+    {
+      "target_id": "08032C690C838D303DC50C9CCB79FEF7",
+      "temporary": true,
+      "saved": false,
+      "project": false,
+      "origin": "https://chatgpt.com",
+      "observed_at": "2026-10-11T09:23:06.813127+00:00"
+    },
+    {
+      "target_id": "A84200E2DA3B77A42693AE7F83A8671F",
+      "temporary": false,
+      "saved": true,
+      "project": false,
+      "origin": "https://chatgpt.com",
+      "observed_at": "2026-10-11T09:23:23.341023+00:00"
+    }
+  ],
+  "actual_surface": "Temporary",
+  "surface_evidence_at": "2026-10-11T09:23:06.813127+00:00",
+  "probe_target_id": "08032C690C838D303DC50C9CCB79FEF7",
+  "actual_url_sanitized": "https://chatgpt.com/?temporary-chat=true",
+  "completed_at": "2026-10-11T09:23:41.641246+00:00",
+  "probe_exit_code": 0,
+  "probe_reply_ok": true,
+  "shared_config_unchanged": true,
+  "shared_bridge_pid_alive": true,
+  "launcher_pid_unchanged": true,
+  "preexisting_project_targets_preserved": true,
+  "existing_surface_targets_preserved": true,
+  "dispatch_result": {
+    "status": "COMPLETED",
+    "endpoint": "http://127.0.0.1:17842/v1",
+    "requested_model": "chatgpt-web/extra-high",
+    "requested_web_effort": "xhigh",
+    "metadata_source": "existing Codex CLI",
+    "output": "/Users/run176504/.control-plane/lanes/asli-t0-20261011/web-temporary/private/probe-output.txt"
+  },
+  "web_ui_evidence": {
+    "target_id": "3B5BC97EA5157B95FD2C6AC861F98907",
+    "observed_at": "2026-10-11T09:22:16.463Z",
+    "temporary": true,
+    "project": false,
+    "controls": [
+      {
+        "label": "Thinking effortExtra High",
+        "testid": null,
+        "navigation": "reasoning"
+      }
+    ]
+  },
+  "status": "PASS",
+  "trace_id": "e3184f21fabb",
+  "own_trace_diagnostics": [
+    {
+      "trace_id": "e3184f21fabb",
+      "checkpoint": "effort-selected",
+      "captured_at": "2026-10-11T09:23:25.589Z",
+      "location": {
+        "origin": "https://chatgpt.com",
+        "pathSegments": 0,
+        "temporaryChat": true
+      },
+      "effort_sliders": [
+        {
+          "min": 0,
+          "max": 3,
+          "value": 3,
+          "power": true,
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "trace_id": "e3184f21fabb",
+      "checkpoint": "effort-selection-confirmed",
+      "captured_at": "2026-10-11T09:23:28.109Z",
+      "location": {
+        "origin": "https://chatgpt.com",
+        "pathSegments": 0,
+        "temporaryChat": true
+      },
+      "effort_sliders": []
+    },
+    {
+      "trace_id": "e3184f21fabb",
+      "checkpoint": "send-accepted",
+      "captured_at": "2026-10-11T09:23:32.038Z",
+      "location": {
+        "origin": "https://chatgpt.com",
+        "pathSegments": 2,
+        "temporaryChat": true
+      },
+      "effort_sliders": []
+    },
+    {
+      "trace_id": "e3184f21fabb",
+      "checkpoint": "turn-completed",
+      "captured_at": "2026-10-11T09:23:38.783Z",
+      "location": {
+        "origin": "https://chatgpt.com",
+        "pathSegments": 2,
+        "temporaryChat": true
+      },
+      "effort_sliders": []
+    }
+  ],
+  "reply": "TEMPORARY_ROUTE_OK",
+  "reply_format": "Markdown underscores escaped in transport, literal normalized",
+  "model_effort_source": "Web UI label captured on own first attempt; own successful retry diagnostics slider value=3, confirmation and completion; alias mapping src/chatgpt-web-models.ts and src/adapters/chatgpt-web/model.ts",
+  "web_model_family": "legacy chatgpt-web/extra-high route; family is not proven by harness model name",
+  "actual_surface_source": "own successful trace diagnostics + metadata-only live URL observations",
+  "retry_note": "second probe incurred one native bounded retry after 5000ms DOM observation timeout; accepted submit occurred only on successful retry",
+  "generation_preservation": "Shared daemon/launcher preserved. First probe observed two preexisting Project targets released during parallel activity; active generation ownership/lease continuity cannot be proved from this task. Second probe began with zero Project pages. T0 must reconcile current generation lease before acceptance of non-interference.",
+  "route_gate": "PASS",
+  "generation_noninterference_gate": "UNKNOWN",
+  "diagnostic_based_verifier_policy": "Final verifier reads only task-private new trace diagnostics; no ownership inferred from unrelated shared browser targets.",
+  "effort_confirmation_note": "Selected checkpoint exposes slider value3; confirmed checkpoint is emitted after persisted-selection validation and menu closure, so its sliders array is empty."
+}
