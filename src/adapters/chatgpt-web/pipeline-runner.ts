@@ -8,6 +8,7 @@ export interface PipelineJobSpec {
   task_id: string;
   mode?: "new" | "edit";
   prompt: string;
+  reasoning?: "low" | "medium" | "high" | "xhigh" | "max";
   output_dir?: string;
   output_basename?: string;
   title?: string;
@@ -71,6 +72,7 @@ export class KeyframePipelineRunner {
   async runSingle(job: PipelineJobSpec, index: number): Promise<{
     taskId: string;
     success: boolean;
+    reasoning: NonNullable<PipelineJobSpec["reasoning"]>;
     result?: string;
     error?: string;
     outputImages?: string[];
@@ -79,13 +81,14 @@ export class KeyframePipelineRunner {
   }> {
     const outDir = job.output_dir ? resolve(job.output_dir) : this.defaultOutputDir;
     const traceId = `${job.task_id.replace(/[^A-Za-z0-9_]/g, "_")}_${Date.now()}`;
+    const reasoning = job.reasoning ?? "low";
 
-    console.log(`[Pipeline #${index + 1}] 🚀 发起任务: ${job.task_id} (Trace: ${traceId})`);
+    console.log(`[Pipeline #${index + 1}] 🚀 发起任务: ${job.task_id} (Trace: ${traceId}, reasoning: ${reasoning})`);
 
     const turn: BrowserTurn = {
       traceId,
       modelId: "gpt-5.6-sol",
-      reasoning: "low",
+      reasoning,
       capabilities: {
         localToolsEnabled: false,
         solAvailable: this.config.solAvailable ?? true,
@@ -167,10 +170,10 @@ export class KeyframePipelineRunner {
       }
       this.taskOutputs.set(job.task_id, outputImages);
       
-      return { taskId: job.task_id, success: true, result, outputImages, depends_on: job.depends_on, mode: job.mode };
+      return { taskId: job.task_id, success: true, reasoning, result, outputImages, depends_on: job.depends_on, mode: job.mode };
     } catch (err: any) {
       console.error(`\n[Pipeline #${index + 1}] ❌ 任务失败: ${job.task_id}: ${err.message || String(err)}`);
-      return { taskId: job.task_id, success: false, error: err.message || String(err), depends_on: job.depends_on, mode: job.mode };
+      return { taskId: job.task_id, success: false, reasoning, error: err.message || String(err), depends_on: job.depends_on, mode: job.mode };
     }
   }
 
@@ -181,7 +184,7 @@ export class KeyframePipelineRunner {
     total: number;
     succeeded: number;
     failed: number;
-    results: Array<{ taskId: string; success: boolean; result?: string; error?: string; outputImages?: string[]; depends_on?: string[]; mode?: "new" | "edit" }>;
+    results: Array<{ taskId: string; success: boolean; reasoning: NonNullable<PipelineJobSpec["reasoning"]>; result?: string; error?: string; outputImages?: string[]; depends_on?: string[]; mode?: "new" | "edit" }>;
   }> {
     console.log(`\n=======================================================`);
     console.log(`🎬 ASLI 分镜生成错峰流水线调度器启动`);
@@ -190,7 +193,7 @@ export class KeyframePipelineRunner {
     console.log(`- 并发租约上限: ${this.concurrencyLimit}`);
     console.log(`=======================================================\n`);
 
-    const results: Array<{ taskId: string; success: boolean; result?: string; error?: string; outputImages?: string[]; depends_on?: string[]; mode?: "new" | "edit" }> = [];
+    const results: Array<{ taskId: string; success: boolean; reasoning: NonNullable<PipelineJobSpec["reasoning"]>; result?: string; error?: string; outputImages?: string[]; depends_on?: string[]; mode?: "new" | "edit" }> = [];
     const taskStatus = new Map<string, { success: boolean, error?: string }>();
     this.taskOutputs.clear();
 
@@ -228,7 +231,7 @@ export class KeyframePipelineRunner {
           const errorMsg = `dependency failed: ${failedDep}`;
           console.error(`[Scheduler] ❌ 任务 ${job.task_id} 因依赖项失败而取消 (${errorMsg})`);
           taskStatus.set(job.task_id, { success: false, error: errorMsg });
-          results.push({ taskId: job.task_id, success: false, error: errorMsg, depends_on: job.depends_on, mode: job.mode });
+          results.push({ taskId: job.task_id, success: false, reasoning: job.reasoning ?? "low", error: errorMsg, depends_on: job.depends_on, mode: job.mode });
           pendingJobs.splice(i, 1);
           i--;
           continue;
