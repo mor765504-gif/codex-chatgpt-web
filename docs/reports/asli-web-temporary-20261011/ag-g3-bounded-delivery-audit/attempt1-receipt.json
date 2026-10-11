@@ -1,0 +1,22 @@
+{
+  "id": "ag-g3-bounded-delivery-audit",
+  "state": "BLOCKED",
+  "pid": 87660,
+  "started_at": "2026-10-11T09:29:29.783475+00:00",
+  "requested_model": "gemini-3.8-flash-medium",
+  "effort": "medium",
+  "sandbox": true,
+  "workspace": "/Users/run176504/.control-plane/lanes/asli-t0-20261011/web-temporary/ag-g3-bounded-delivery-audit",
+  "source_brief": "/Users/run176504/Documents/Workspace/control-plane/lanes/asli-t0-20261011/agy-fanout/ag-g3-bounded-delivery-audit.brief.md",
+  "acceptance": "PENDING_T0_REVIEW",
+  "output_expected": "/Users/run176504/.control-plane/lanes/asli-t0-20261011/web-temporary/ag-g3-bounded-delivery-audit/ag-g3-bounded-delivery-audit.md",
+  "exit_code": 0,
+  "completed_at": "2026-10-11T09:29:49.886930+00:00",
+  "init_model": "gemini-3.8-flash-medium",
+  "init_cid": "a5b4614a-40b3-4d28-a98e-f56d3027b551",
+  "result_cid": "a5b4614a-40b3-4d28-a98e-f56d3027b551",
+  "result_status": "SUCCESS",
+  "permission_mode": "request-review",
+  "reply_nonempty": false,
+  "written_artifact_exists": false
+}

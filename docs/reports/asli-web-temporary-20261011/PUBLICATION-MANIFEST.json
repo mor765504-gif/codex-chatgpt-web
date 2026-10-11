@@ -1,0 +1,133 @@
+{
+  "created_at": "2026-10-11T09:38:03.011427+00:00",
+  "corresponding_repository": "https://github.com/mor765504-gif/codex-chatgpt-web",
+  "tested_engine_baseline": "32459ee4e61002265e182a0b89ec033e9dcf7138",
+  "official_agy_version": "1.3.3",
+  "publication_owner": "T0/root 01a12a54-0f7a-76e2-b803-982a780d3b34",
+  "upload_status": "NOT_UPLOADED_BY_EXECUTOR",
+  "upload_blocker": "Explicit executor write set only this non-Git lane; coordinator owns scoped commit/push",
+  "exclude": [
+    "private/**",
+    "__pycache__/**",
+    "historical checker attempts",
+    "probe-ui-evidence.json (first failed internal Web attempt; final own-trace diagnostics supersede)"
+  ],
+  "files": [
+    {
+      "path": ".gitignore",
+      "bytes": 22
+    },
+    {
+      "path": "BLUEPRINT.md",
+      "bytes": 4452
+    },
+    {
+      "path": "ROOT-HANDOFF.md",
+      "bytes": 6365
+    },
+    {
+      "path": "ARTIFACT-GATES.md",
+      "bytes": 5103
+    },
+    {
+      "path": "bootstrap.mjs",
+      "bytes": 1829
+    },
+    {
+      "path": "launch.sh",
+      "bytes": 523
+    },
+    {
+      "path": "dispatch.py",
+      "bytes": 1882
+    },
+    {
+      "path": "verify.py",
+      "bytes": 4185
+    },
+    {
+      "path": "install-official-agy.py",
+      "bytes": 1792
+    },
+    {
+      "path": "probe-agy.py",
+      "bytes": 1962
+    },
+    {
+      "path": "dispatch-agy-tasks.py",
+      "bytes": 3457
+    },
+    {
+      "path": "retry-agy-artifacts.py",
+      "bytes": 4215
+    },
+    {
+      "path": "probe.txt",
+      "bytes": 74
+    },
+    {
+      "path": "verification.json",
+      "bytes": 5650
+    },
+    {
+      "path": "agy-installation.json",
+      "bytes": 685
+    },
+    {
+      "path": "agy-verification.json",
+      "bytes": 670
+    },
+    {
+      "path": "worker-registers.json",
+      "bytes": 951
+    },
+    {
+      "path": "agy-worker-registers.json",
+      "bytes": 5076
+    },
+    {
+      "path": "source-packs.json",
+      "bytes": 4362
+    },
+    {
+      "path": "ag-g1-management-evidence/ag-g1-management-evidence.md",
+      "bytes": 20142
+    },
+    {
+      "path": "ag-g1-management-evidence/receipt.json",
+      "bytes": 1555
+    },
+    {
+      "path": "ag-g1-management-evidence/attempt1-receipt.json",
+      "bytes": 1015
+    },
+    {
+      "path": "ag-g2-monitor-layout/ag-g2-monitor-layout.md",
+      "bytes": 26049
+    },
+    {
+      "path": "ag-g2-monitor-layout/receipt.json",
+      "bytes": 1520
+    },
+    {
+      "path": "ag-g2-monitor-layout/attempt1-receipt.json",
+      "bytes": 990
+    },
+    {
+      "path": "ag-g3-bounded-delivery-audit/ag-g3-bounded-delivery-audit.md",
+      "bytes": 12424
+    },
+    {
+      "path": "ag-g3-bounded-delivery-audit/receipt.json",
+      "bytes": 1576
+    },
+    {
+      "path": "ag-g3-bounded-delivery-audit/attempt1-receipt.json",
+      "bytes": 1030
+    },
+    {
+      "path": "CONTROLLER-TRANSFER.json",
+      "bytes": 525
+    }
+  ]
+}

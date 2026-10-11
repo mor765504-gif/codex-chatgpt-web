@@ -1,0 +1,22 @@
+{
+  "id": "ag-g1-management-evidence",
+  "state": "BLOCKED",
+  "pid": 87658,
+  "started_at": "2026-10-11T09:29:29.751876+00:00",
+  "requested_model": "gemini-3.8-flash-medium",
+  "effort": "medium",
+  "sandbox": true,
+  "workspace": "/Users/run176504/.control-plane/lanes/asli-t0-20261011/web-temporary/ag-g1-management-evidence",
+  "source_brief": "/Users/run176504/Documents/Workspace/control-plane/lanes/asli-t0-20261011/agy-fanout/ag-g1-management-evidence.brief.md",
+  "acceptance": "PENDING_T0_REVIEW",
+  "output_expected": "/Users/run176504/.control-plane/lanes/asli-t0-20261011/web-temporary/ag-g1-management-evidence/ag-g1-management-evidence.md",
+  "exit_code": 0,
+  "completed_at": "2026-10-11T09:31:50.335990+00:00",
+  "init_model": "gemini-3.8-flash-medium",
+  "init_cid": "db7d163c-3351-4ebf-89fb-2a26c8ef7cc1",
+  "result_cid": "db7d163c-3351-4ebf-89fb-2a26c8ef7cc1",
+  "result_status": "SUCCESS",
+  "permission_mode": "request-review",
+  "reply_nonempty": false,
+  "written_artifact_exists": false
+}

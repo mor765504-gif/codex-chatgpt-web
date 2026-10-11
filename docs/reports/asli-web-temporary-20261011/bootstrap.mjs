@@ -1,0 +1,18 @@
+import { defaultConfig } from '/Users/run176504/.gemini/antigravity/scratch/codex-chatgpt-web/src/config.ts';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:net';
+const lane = dirname(fileURLToPath(import.meta.url));
+const home = join(lane, 'private', 'home');
+process.env.CODEX_CHATGPT_WEB_HOME = home;
+const shared = JSON.parse(readFileSync('/Users/run176504/.codex-chatgpt-web/config.json', 'utf8'));
+if (shared.browserHost !== 'launcher' || shared.browserInteractionMode !== 'automatic') throw Error('Existing authenticated launcher Automatic mode required');
+const socket = createServer();
+await new Promise((resolve,reject)=>socket.once('error',reject).listen(17842,'127.0.0.1',resolve));
+await new Promise(resolve=>socket.close(resolve));
+mkdirSync(home,{recursive:true,mode:0o700}); chmodSync(join(lane,'private'),0o700); chmodSync(home,0o700);
+const config = defaultConfig('browser-only');
+Object.assign(config,{port:17842,browserHost:'launcher',browserInteractionMode:'automatic',browserHostDescriptorPath:shared.browserHostDescriptorPath,solAvailable:shared.solAvailable===true,extraHighAvailable:shared.extraHighAvailable===true,proAvailable:false,useSavedChats:false,experimentalFreshConversationPerTurn:true,experimentalSkillAttachments:false,runtimeCommand:['/Users/run176504/.codex-chatgpt-web/versions/6.1.7-darwin-arm64/bin/codex-chatgpt-web']});
+writeFileSync(join(home,'config.json'), JSON.stringify(config,null,2)+'\n',{mode:0o600,flag:'wx'});
+console.log(JSON.stringify({created_at:new Date().toISOString(),endpoint:'http://127.0.0.1:17842/v1',configured_surface:'Temporary',auth:'existing launcher descriptor reference only',port_bind_preflight:'PASS'}));

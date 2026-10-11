@@ -1,0 +1,29 @@
+{
+  "routes": [
+    {
+      "id": "asli-t0-web-temporary-17842-20261011",
+      "role": "temporary discussion infrastructure",
+      "owner": "this infrastructure executor; sole T0 01a12a54-0f7a-76e2-b803-982a780d3b34",
+      "state": "ROUTE_ACCEPTED",
+      "endpoint": "http://127.0.0.1:17842/v1",
+      "pid": 73511,
+      "managed_exec_session": 87697,
+      "configured_surface": "Temporary",
+      "actual_surface": "Temporary",
+      "trace_id": "e3184f21fabb",
+      "model": "chatgpt-web/extra-high",
+      "web_effort": "xhigh",
+      "capacity": "unknown",
+      "generation_noninterference": "UNKNOWN",
+      "source_write_set_modified": false,
+      "private_paths_excluded": [
+        "private/"
+      ],
+      "evidence_at": "2026-10-11T09:28:29.283187+00:00",
+      "live_rechecked_at": "2026-10-11T09:41:34.513495+00:00"
+    }
+  ],
+  "agy_workers": [],
+  "sole_t0": "01a12a54-0f7a-76e2-b803-982a780d3b34",
+  "projection_only": true
+}
