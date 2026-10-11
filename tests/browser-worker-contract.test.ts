@@ -7,6 +7,7 @@ import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
 import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
+import { chatGptImageComposerState, insertPlainTextIntoComposer } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
@@ -74,6 +75,178 @@ test("unavailable Pro detail reads only its linked tooltip in any language", asy
     expect(await observe(details[0]!, kind)).toBeUndefined();
   }
   expect(await observe("x".repeat(513))).toBeUndefined();
+});
+
+test("image-job snapshot uses current generated widgets and exposes failure UI without treating references as ready", async () => {
+  const { createWindow } = require("@mixmark-io/domino");
+  const dom = createWindow();
+  const originalInnerText = Object.getOwnPropertyDescriptor(dom.HTMLElement.prototype, "innerText");
+  Object.defineProperty(dom.HTMLElement.prototype, "innerText", {configurable:true, get() {return this.textContent;}});
+  for (const prototype of [dom.document.querySelectorAll("img"), dom.document.body.children].map(Object.getPrototypeOf)) {
+    Object.defineProperty(prototype, Symbol.iterator, {configurable:true,value:Array.prototype[Symbol.iterator]});
+  }
+  try {
+    for (const [content, ready, failed] of [
+      ['<div class="markdown"><img></div>', false, false],
+      ['<div data-testid="generated-image-gallery"><img></div>', true, false],
+      ['<div role="status">Image generation failed</div>', false, true],
+    ] as const) {
+      const window = createWindow(`<article id="current" data-message-author-role="assistant">${content}<button data-testid="copy-turn-action-button">Copy</button></article>`);
+      const image = window.document.querySelector("img");
+      if (image) Object.defineProperties(image, {complete:{value:true},naturalWidth:{value:1672},naturalHeight:{value:941}});
+      const context = createContext({
+        document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,
+        NodeFilter:window.NodeFilter,performance:{timeOrigin:1},getComputedStyle:()=>({display:"block",visibility:"visible",opacity:"1"}),
+        MutationObserver:class {observe() {}},
+      });
+      const locator = {
+        evaluate:async (callback:Function, options:unknown) => runInContext(`(${callback.toString()})`,context)(window.document.getElementById("current"),options),
+        page:()=>({isClosed:()=>false}),
+      };
+      const worker = Object.create(ChatGptBrowserWorker.prototype) as {
+        responseDomSnapshot(locator:unknown, cache:object, output:unknown):Promise<{imageReady:boolean;imageFailureUiVisible?:boolean}>;
+      };
+      const snapshot = await worker.responseDomSnapshot(locator,{}, {outputDir:"/tmp/not-written-image-inspection"});
+      expect(snapshot.imageReady).toBe(ready);
+      expect(snapshot.imageFailureUiVisible).toBe(failed);
+    }
+  } finally {
+    if (originalInnerText) Object.defineProperty(dom.HTMLElement.prototype,"innerText",originalInnerText);
+    else delete dom.HTMLElement.prototype.innerText;
+  }
+});
+
+test("new image preparation selects the observed entry before attaching verbatim prompt; edit/chat never select it", async () => {
+  const attach = (ChatGptBrowserWorker.prototype as any).attachPrompt;
+  const {createWindow} = require("@mixmark-io/domino");
+  const prompt = "full original F0489\r\n规格\n\n ";
+  for (const operation of ["new", "edit", undefined]) {
+    const events: string[] = [];
+    const window = createWindow('<form><div role="textbox" contenteditable="true"></div></form>');
+    const editor = window.document.querySelector('[role="textbox"]');
+    const composer = {
+      fill:async()=>{events.push("clear");editor.innerHTML="";},focus:async()=>{},
+      evaluate:async(callback:Function)=>callback(editor),
+      locator:()=>({getByRole:(_role:string, opts:{name:string})=>opts.name === "Add files and more"
+        ? {filter(){return this;},count:async()=>1,first(){return this;},isEnabled:async()=>true,click:async()=>{events.push("menu");}}
+        : {filter(){return this;},count:async()=>0}}),
+    };
+    const page = Object.assign(dialogPage("").page, {getByRole:(_role:string, opts:{name:string|RegExp})=>{
+      const entry = opts.name instanceof RegExp || opts.name === "Create image";
+      return {filter(){return this;},count:async()=>1,first(){return this;},isEnabled:async()=>true,
+        click:async()=>{events.push(entry ? "select" : "menu");if(entry)editor.innerHTML='<p><span contenteditable="false"><span>Create image</span></span> </p>';}};
+    }});
+    const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+      config:{useSavedChats:true,chatgptProjectUrl:"https://chatgpt.com/g/g-p-test/project"},
+      ensureEmptyComposer:async()=>{},activeComposer:async()=>composer,
+      insertPromptText:async (_page:unknown, text:string)=>{
+        expect(text).toBe(prompt);events.push("prompt");
+        const paragraph=window.document.createElement("p");paragraph.textContent=text;editor.appendChild(paragraph);
+      },
+      clearChatGptComposerState:async()=>{},
+    });
+    await attach.call(worker,page,prompt,false,undefined,undefined,false,undefined,false,
+      operation ? {outputDir:"/tmp/not-written-preparation",operation} : undefined);
+    expect(events).toEqual(operation === "new" ? ["clear","menu","select","prompt"] : ["clear","prompt"]);
+    expect(await worker.attachedPromptText(page)).toBe(prompt.trimStart());
+    expect(await worker.newImageToolIsSelected(composer)).toBe(operation === "new");
+  }
+});
+
+test("missing new-image entry fails before attaching prompt or sending", async () => {
+  const attach = (ChatGptBrowserWorker.prototype as any).attachPrompt;
+  let inserted = false;
+  const hidden = {filter(){return this;},count:async()=>0,first(){return this;}};
+  const composer = {fill:async()=>{},focus:async()=>{},evaluate:async()=>({selected:false,promptText:""}),locator:()=>({getByRole:()=>hidden})};
+  const page = Object.assign(dialogPage("").page, {getByRole:()=>hidden});
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    config:{useSavedChats:true,chatgptProjectUrl:"https://chatgpt.com/g/g-p-test/project"},
+    ensureEmptyComposer:async()=>{},activeComposer:async()=>composer,
+    insertPromptText:async()=>{inserted=true;},assertPromptAttached:async()=>{},clearChatGptComposerState:async()=>{},
+  });
+  await expect(attach.call(worker,page,"original full prompt",false,undefined,undefined,false,undefined,false,
+    {outputDir:"/tmp/not-written-preparation",operation:"new"})).rejects.toThrow("image_new_tool_entry_missing");
+  expect(inserted).toBeFalse();
+});
+
+test("new-image entry selection without confirmed composer mode fails before prompt insertion", async () => {
+  let inserted = false;
+  let selections = 0;
+  const emptyChip = {filter(){return this;},count:async()=>0,first(){return this;}};
+  const button = {filter(){return this;},count:async()=>1,first(){return this;},isEnabled:async()=>true,click:async()=>{selections+=1;}};
+  const composer = {fill:async()=>{},focus:async()=>{},evaluate:async()=>({selected:false,promptText:""}),locator:()=>({getByRole:(_role:string,opts:{name:string})=>opts.name === "Create image" ? emptyChip : button})};
+  const page = Object.assign(dialogPage("").page,{getByRole:()=>button});
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+    config:{useSavedChats:true,chatgptProjectUrl:"https://chatgpt.com/g/g-p-test/project"},
+    ensureEmptyComposer:async()=>{},activeComposer:async()=>composer,
+    insertPromptText:async()=>{inserted=true;},assertPromptAttached:async()=>{},clearChatGptComposerState:async()=>{},
+  });
+  await expect(worker.attachPrompt(page,"full prompt",false,undefined,undefined,false,undefined,false,
+    {outputDir:"/tmp/not-written-preparation",operation:"new"})).rejects.toThrow("image_new_tool_selection_unconfirmed");
+  expect(inserted).toBeFalse();
+  expect(selections).toBe(2); // One opener, one entry; no retry.
+});
+
+test("actual noneditable image mention is selected; prompt text, quotes and menu are not tool state", async () => {
+  const {createWindow} = require("@mixmark-io/domino");
+  const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+  for (const [html, expected] of [
+    ['<p><span class="Mention-hIgCkC" contenteditable="false"><span class="Label-arpLwJ">Create image</span></span> </p>',true],
+    ['<p>Create image</p>',false],
+    ['<p><span>Create image</span></p>',false],
+    ['<blockquote><p><span contenteditable="false"><span>Create image</span></span></p></blockquote>',false],
+    ['<div role="menu"><p><span contenteditable="false"><span>Create image</span></span></p></div>',false],
+    ['<p><span contenteditable="false">Create image</span></p>',false],
+  ] as const) {
+    const window = createWindow(`<form><div role="textbox" contenteditable="true">${html}</div></form>`);
+    const composer = {
+      evaluate:async(callback:Function)=>callback(window.document.querySelector('[role="textbox"]')),
+      locator:()=>({getByRole:()=>({filter(){return this;},count:async()=>0})}),
+    };
+    expect(await worker.newImageToolIsSelected(composer)).toBe(expected);
+  }
+});
+
+test("real prompt readback excludes only the observed tool decorator and preserves the complete raw specification", async () => {
+  const {createWindow} = require("@mixmark-io/domino");
+  const fullPrompt = '  F0489 original complete specification\nCreate image is literal prompt content.\n规格\n\n ';
+  const window = createWindow('<div role="textbox" contenteditable="true"><p><span contenteditable="false"><span>Create image</span></span> </p></div>');
+  const element = window.document.querySelector('[role="textbox"]');
+  const text = window.document.createElement("p");
+  text.textContent = fullPrompt;
+  element.appendChild(text);
+  for (const prototype of [element.childNodes, element.querySelectorAll("span")].map(Object.getPrototypeOf)) {
+    Object.defineProperty(prototype,Symbol.iterator,{configurable:true,value:Array.prototype[Symbol.iterator]});
+  }
+  const composer = {evaluate:async(callback:Function)=>callback(element)};
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype),{activeComposer:async()=>composer}) as any;
+  const page = {};
+  expect(await worker.attachedPromptText(page)).toBe(fullPrompt);
+  await worker.assertPromptAttached(page,fullPrompt);
+  expect(await worker.newImageToolIsSelected(composer)).toBeTrue();
+  expect(element.querySelector('[contenteditable="false"]').textContent).toBe("Create image");
+});
+
+test("plain-text insertion places the entire raw prompt after the actual tool mention without removing selection", () => {
+  const {createWindow} = require("@mixmark-io/domino");
+  const window = createWindow('<div role="textbox" contenteditable="true"><p><span contenteditable="false"><span>Create image</span></span> </p></div>');
+  const editor = window.document.querySelector('[role="textbox"]');
+  const raw = '  FULL F0489\r\nCreate image is ordinary requested text.\n规格\n\n ';
+  const selection = {
+    isCollapsed:false,anchorNode:null as unknown,
+    removeAllRanges(){},addRange(){this.isCollapsed=true;this.anchorNode=editor.lastChild;},
+  };
+  Object.defineProperty(window.document,"activeElement",{value:editor});
+  window.document.createRange = () => ({selectNodeContents:(node:unknown)=>expect(node).toBe(editor),collapse:(start:boolean)=>expect(start).toBeFalse()});
+  window.document.execCommand = (command:string, _ui:boolean, text:string) => {
+    expect(command).toBe("insertText");expect(text).toBe(raw);
+    editor.lastChild.appendChild(window.document.createTextNode(text));return true;
+  };
+  const context = createContext({document:window.document,window:{getSelection:()=>selection}});
+  expect(runInContext(`(${insertPlainTextIntoComposer.toString()})`,context)(editor,raw)).toBeTrue();
+  const observed = chatGptImageComposerState(editor);
+  expect(observed.selected).toBeTrue();
+  expect(observed.promptText).toBe(raw);
 });
 
 test("conversation turn identity survives ChatGPT DOM virtualization", () => {
