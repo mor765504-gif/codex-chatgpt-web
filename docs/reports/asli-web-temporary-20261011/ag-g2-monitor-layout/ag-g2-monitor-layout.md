@@ -206,22 +206,22 @@
   .badge-warning { background: var(--accent-yellow); color: #000; }
   .badge-success { background: var(--accent-green); color: #000; }
   .badge-info { background: var(--accent-blue); color: #000; }
-  
+
   .alert-banner { background: #450a0a; border: 1px solid var(--accent-red); padding: 8px 12px; margin-bottom: 12px; border-radius: 4px; }
-  
+
   .panel { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px; margin-bottom: 12px; }
   .panel-title { font-size: 14px; font-weight: bold; margin-bottom: 8px; color: var(--text-secondary); text-transform: uppercase; }
-  
+
   /* Pipeline Lanes */
   .pipeline-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
   .lane-card { background: #0f172a; border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; text-align: center; }
   .lane-card.blocked { border-color: var(--accent-red); background: #2a1215; }
-  
+
   /* Tables */
   table { width: 100%; border-collapse: collapse; text-align: left; }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--border-color); }
   th { color: var(--text-secondary); font-weight: 600; }
-  
+
   /* Details Collapsible */
   details summary { cursor: pointer; color: var(--text-secondary); font-weight: bold; }
   details[open] summary { margin-bottom: 8px; }

@@ -103,7 +103,8 @@
     },
     {
       "path": "ag-g2-monitor-layout/ag-g2-monitor-layout.md",
-      "bytes": 26049
+      "bytes": 26039,
+      "source_bytes": 26049
     },
     {
       "path": "ag-g2-monitor-layout/receipt.json",
@@ -115,7 +116,8 @@
     },
     {
       "path": "ag-g3-bounded-delivery-audit/ag-g3-bounded-delivery-audit.md",
-      "bytes": 12424
+      "bytes": 12428,
+      "source_bytes": 12424
     },
     {
       "path": "ag-g3-bounded-delivery-audit/receipt.json",
@@ -129,5 +131,28 @@
       "path": "CONTROLLER-TRANSFER.json",
       "bytes": 525
     }
-  ]
+  ],
+  "root_formatting_revision": {
+    "reason": "Initial cached whitespace gate failed; scoped normal follow-up commit resolves it, no probe rerun or original source modification",
+    "files": [
+      {
+        "path": "ag-g2-monitor-layout/ag-g2-monitor-layout.md",
+        "changed_lines": [],
+        "original_bytes": 26039,
+        "published_bytes": 26039,
+        "equivalence": "Non-whitespace text unchanged; nonempty Markdown hard breaks preserved with br; whitespace-only lines emptied"
+      },
+      {
+        "path": "ag-g3-bounded-delivery-audit/ag-g3-bounded-delivery-audit.md",
+        "changed_lines": [
+          3,
+          4
+        ],
+        "original_bytes": 12424,
+        "published_bytes": 12428,
+        "equivalence": "Non-whitespace text unchanged; nonempty Markdown hard breaks preserved with br; whitespace-only lines emptied"
+      }
+    ],
+    "original_probe_baseline_preserved": true
+  }
 }
