@@ -112,6 +112,38 @@ import type {
 export { MAX_CHATGPT_BROWSER_TABS } from "./concurrency";
 
 const workers = new Map<string, ChatGptBrowserWorker>();
+// Saved Chat drafts can be restored across tabs (and across provider worker instances).
+// Cross-Project isolation is unverified, so all Saved Chats share one global key.
+// Only preparation through accepted Send is exclusive; response observation is not.
+const composerDraftTails = new Map<string, Promise<void>>();
+
+async function acquireComposerDraftLock(signal?: AbortSignal): Promise<() => void> {
+  throwIfPromptAttachmentAborted(signal);
+  const key = "chatgpt-saved-chats";
+  const previous = composerDraftTails.get(key) ?? Promise.resolve();
+  let unlock!: () => void;
+  const gate = new Promise<void>(resolve => { unlock = resolve; });
+  const tail = previous.then(() => gate);
+  composerDraftTails.set(key, tail);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    unlock();
+    void tail.then(() => {
+      if (composerDraftTails.get(key) === tail) composerDraftTails.delete(key);
+    });
+  };
+  try {
+    await withBrowserTurnAbort(previous, signal);
+    throwIfPromptAttachmentAborted(signal);
+    return release;
+  } catch (error) {
+    // A cancelled waiter must not let its successors overtake the current owner.
+    void previous.then(release);
+    throw error;
+  }
+}
 
 export async function closeChatGptBrowserWorkers(): Promise<void> {
   const active = [...workers.values()];
@@ -3492,6 +3524,59 @@ export class ChatGptBrowserWorker {
     });
   }
 
+  private async ensureEmptyComposer(page: Page, abortSignal?: AbortSignal): Promise<void> {
+    try {
+      await runChatGptPersonalizationCleanup(async (deadline, cleanupSignal) => {
+        const signal = abortSignal ? AbortSignal.any([abortSignal, cleanupSignal]) : cleanupSignal;
+        const readState = async () => {
+          const composer = await this.activeComposer(page, remainingChatGptPersonalizationMs(deadline, signal), signal);
+          const state = await composer.evaluate(element => {
+            const form = element.closest("form");
+            if (!form) throw new Error("ChatGPT composer has no attachment form");
+            return {
+              textChars: (element.textContent ?? "").trim().length,
+              attachments: form.querySelectorAll('.composer-attachment-surface, [role="group"][aria-label]').length,
+              inputFiles: [...form.querySelectorAll<HTMLInputElement>('input[type="file"]')]
+                .reduce((count, input) => count + (input.files?.length ?? 0), 0),
+            };
+          }, undefined, { timeout: remainingChatGptPersonalizationMs(deadline, signal), signal });
+          return { ...state, connectorSelected: await this.connectorIsSelected(composer, signal), composer };
+        };
+        let state = await readState();
+        if (!state.textChars && !state.attachments && !state.inputFiles && !state.connectorSelected) return;
+        // Use native editing actions so Lexical and its persisted draft both observe the reset.
+        await this.clearChatGptComposerState(page);
+        state = await readState();
+        const form = state.composer.locator("xpath=ancestor::form[1]");
+        while (state.attachments > 0) {
+          const remove = form.getByRole("button", { name: /^Remove(?:\s.*)?$/i }).filter({ visible: true });
+          if (await remove.count() === 0) throw new Error("ChatGPT restored draft attachments have no native Remove control");
+          await remove.first().click({ timeout: remainingChatGptPersonalizationMs(deadline, signal), signal });
+          await waitForChatGptPersonalizationPoll(CHATGPT_UI_SETTLE_MS, signal);
+          const next = await readState();
+          if (next.attachments >= state.attachments) throw new Error("ChatGPT restored draft attachment removal did not take effect");
+          state = next;
+        }
+        if (state.inputFiles) {
+          const inputs = form.locator('input[type="file"]');
+          for (let index = 0; index < await inputs.count(); index += 1) {
+            await inputs.nth(index).setInputFiles([], { timeout: remainingChatGptPersonalizationMs(deadline, signal), signal });
+          }
+        }
+        state = await readState();
+        if (state.textChars || state.attachments || state.inputFiles || state.connectorSelected) {
+          throw new Error(`ChatGPT composer is not empty (textChars=${state.textChars}, attachments=${state.attachments}, inputFiles=${state.inputFiles}, connectorSelected=${state.connectorSelected})`);
+        }
+      });
+    } catch (error) {
+      if (abortSignal?.aborted) throw error;
+      throw new ChatGptWebAdapterError(
+        "ChatGPT restored draft could not be cleared and verified empty; the message was not submitted",
+        { status: 502, errorType: "server_error", code: "composer_draft_cleanup_failed", retryable: false, cause: error },
+      );
+    }
+  }
+
   private async selectConnector(
     page: Page,
     captureDiagnostic?: (checkpoint: string) => Promise<void>,
@@ -3721,6 +3806,9 @@ export class ChatGptBrowserWorker {
     throwIfPromptAttachmentAborted(abortSignal);
     await throwIfChatGptRateLimitDialog(page);
     throwIfPromptAttachmentAborted(abortSignal);
+    if (this.config?.useSavedChats) {
+      await this.ensureEmptyComposer(page, abortSignal);
+    }
     let composerMutationStarted = false;
     try {
       if (!localTools) {
@@ -5021,6 +5109,8 @@ export class ChatGptBrowserWorker {
     const usageWrites: Promise<void>[] = [];
     const originalAbortSignal = turn.abortSignal;
     const rejectionAbort = new AbortController();
+    let releaseComposerDraft: (() => void) | undefined;
+    const protectComposerDraft = this.config.useSavedChats;
     const submissionRejection = new ChatGptSubmissionRejectionObserver(error => rejectionAbort.abort(error));
     turn = { ...turn, abortSignal: originalAbortSignal
       ? AbortSignal.any([originalAbortSignal, rejectionAbort.signal])
@@ -5100,6 +5190,9 @@ export class ChatGptBrowserWorker {
       const deadline = this.config.turnTimeoutMs === undefined
         ? undefined
         : Date.now() + this.config.turnTimeoutMs;
+      // Acquire before navigation can restore a sibling's in-flight draft. Waiting here does
+      // not consume the prompt-attachment stage budget and remains caller-abortable.
+      if (protectComposerDraft) releaseComposerDraft = await acquireComposerDraftLock(turn.abortSignal);
       let page = await this.runStage(turn.traceId, "browser_page", browserStageTimeouts.browserPage, async (abortSignal) => {
         if (maintenancePage) return maintenancePage;
         if (!launcherSurfaceId) {
@@ -5312,6 +5405,7 @@ export class ChatGptBrowserWorker {
             effort: mode.effort, modelFamily: mode.modelFamily,
             messageChars: stage.text.length, estimatedMessageTokens: stageMessageTokens![index],
           })}`);
+          if (protectComposerDraft && !releaseComposerDraft) releaseComposerDraft = await acquireComposerDraftLock(turn.abortSignal);
           let stageBaseline = await this.captureSubmissionBaseline(page, stage.text, acknowledgedStages);
           await this.runStage(
             turn.traceId,
@@ -5352,7 +5446,11 @@ export class ChatGptBrowserWorker {
                 }
                 : undefined,
             ),
+            chatGptSuspensionClock,
+            protectComposerDraft,
           );
+          releaseComposerDraft?.();
+          releaseComposerDraft = undefined;
           console.info(
             `[chatgpt-web] browser turn ${turn.traceId} multipart part ${index + 1}/${prepared.multipart.parts.length} submission accepted evidence=${evidence}`,
           );
@@ -5426,6 +5524,7 @@ export class ChatGptBrowserWorker {
         finalPrompt = multipartFinalPrompt;
       }
 
+      if (protectComposerDraft && !releaseComposerDraft) releaseComposerDraft = await acquireComposerDraftLock(turn.abortSignal);
       let submissionBaseline = await this.captureSubmissionBaseline(page, finalPrompt, acknowledgedStages);
       let catalogRefreshAvailable = mode.localTools && !reuseConversation && !prepared.multipart;
       const connectorAttemptBudget: ChatGptConnectorAttemptBudget = { triggerAttempts: 0 };
@@ -5490,7 +5589,7 @@ export class ChatGptBrowserWorker {
       await diagnostics.capture(page, "prompt-attachment-complete");
       await this.runStage(turn.traceId, "file_attachment", browserStageTimeouts.fileAttachment, () => (
         this.attachFiles(page, prepared)
-      ));
+      ), chatGptSuspensionClock, protectComposerDraft);
       await diagnostics.capture(page, "file-attachment-complete");
       const completionTracker = new ChatGptCompletionTracker();
       const recordFinalUsage = await usageSubmission();
@@ -5523,7 +5622,11 @@ export class ChatGptBrowserWorker {
             }
             : undefined,
         ),
+        chatGptSuspensionClock,
+        protectComposerDraft,
       );
+      releaseComposerDraft?.();
+      releaseComposerDraft = undefined;
       console.info(`[chatgpt-web] browser turn ${turn.traceId} submission accepted evidence=${finalSubmissionEvidence}`);
       let responseTurn = await this.waitForNewAssistantTurn(
         page,
@@ -5888,6 +5991,8 @@ export class ChatGptBrowserWorker {
       }
       throw error;
     } finally {
+      // Release failures as well as successful Sends, after outstanding mutations settle.
+      releaseComposerDraft?.();
       submissionRejection.dispose();
       await Promise.all(usageWrites);
       prepared.release();
