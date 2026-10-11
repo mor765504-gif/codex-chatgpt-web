@@ -98,6 +98,7 @@ export class KeyframePipelineRunner {
         proAvailable: this.config.proAvailable ?? true,
       },
       imageOutput: {
+        operation: job.mode,
         outputDir: outDir,
         maxImages: 1,
         minWidth: 512,

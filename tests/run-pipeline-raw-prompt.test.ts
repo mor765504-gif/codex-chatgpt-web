@@ -63,6 +63,7 @@ describe("run-pipeline JSON raw_prompt", () => {
       let prepared: Awaited<ReturnType<BrowserTurn["prepare"]>> | undefined;
       runner["worker"] = {
         run: async (turn: BrowserTurn) => {
+          expect((turn.imageOutput as {operation?:string})?.operation).toBe(mode);
           prepared = await turn.prepare();
           return "test browser result";
         },

@@ -87,7 +87,7 @@ import {
 import { LauncherBrowserHelperClient } from "./launcher-helper-client";
 import { assertChatGptModelFamily, selectChatGptModelFamily } from "./model-selection";
 import { MAX_CHATGPT_BROWSER_TABS } from "./concurrency";
-import { captureChatGptAssistantImages, type ChatGptImageOutputOptions } from "./image-output";
+import { captureChatGptAssistantImages, inspectChatGptAssistantImages, type ChatGptImageOutputOptions } from "./image-output";
 import {
   ChatGptCompactionHandoffAccepted,
   ChatGptWebAdapterError,
@@ -1820,6 +1820,7 @@ export interface ChatGptVisibleTraceEvent {
 interface ChatGptResponseDomSnapshot {
   responsePresent: boolean;
   imageReady: boolean;
+  imageFailureUiVisible?: boolean;
   visibleText: string;
   fullHtml: string;
   markdownSegments: ChatGptMarkdownSegment[];
@@ -2316,6 +2317,37 @@ export function chatGptPromptFilePayloads(
  * exactly where the user put it; only a missing or foreign one is replaced, and always with a
  * position inside this composer, so an insert can never land in another element.
  */
+/** D004 observed composer decorator. No hashed classes or prompt-text matching. */
+export function chatGptImageComposerState(element: HTMLElement): { selected: boolean; promptText: string } {
+  const markers = (root: HTMLElement): Element[] => {
+    if (!root.matches('[role="textbox"][contenteditable="true"]')) return [];
+    return Array.from(root.querySelectorAll('span[contenteditable="false"]')).filter(mention => (
+      mention.parentElement?.tagName === "P" && mention.parentElement.parentElement === root
+      && !mention.closest('[role="menu"], [role="dialog"], blockquote, q, pre, code')
+      && Array.from(mention.children).some(label => label.tagName === "SPAN"
+        && label.getAttribute("contenteditable") !== "true" && label.textContent?.trim() === "Create image")
+    ));
+  };
+  const selected = markers(element).length === 1;
+  const clone = element.cloneNode(true) as HTMLElement;
+  markers(clone).forEach(marker => {
+    const paragraph = marker.parentElement!;
+    // D004 shows one editor spacer after the mention. Remove only that UI space,
+    // retaining every following code unit of the raw prompt, including leading spaces.
+    const spacer = marker.nextSibling;
+    if (spacer?.nodeType === 3 && spacer.textContent?.startsWith(" ")) {
+      spacer.textContent = spacer.textContent.slice(1);
+    }
+    marker.remove();
+    if (paragraph.textContent === "" && paragraph.children.length === 0) paragraph.remove();
+  });
+  clone.querySelectorAll(
+    'svg, style, script, [data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]',
+  ).forEach(part => part.remove());
+  const promptText = Array.from(clone.childNodes).map(child => child.textContent ?? "").join("\n");
+  return { selected, promptText: selected ? promptText : promptText.trimStart() };
+}
+
 export function insertPlainTextIntoComposer(element: HTMLElement, value: string): boolean {
   if (document.activeElement !== element) element.focus();
   if (document.activeElement !== element) return false;
@@ -3384,19 +3416,7 @@ export class ChatGptBrowserWorker {
 
   private async attachedPromptText(page: Page, abortSignal?: AbortSignal): Promise<string> {
     const composer = await this.activeComposer(page, 30_000, abortSignal);
-    return composer.evaluate(element => {
-      const clone = element.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll(
-        // Read message content, not icon titles, embedded CSS or scripts. Literal
-        // markup stays as text, and arbitrary non-editable content is still checked.
-        'svg, style, script, [data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]',
-      )
-        .forEach(part => part.remove());
-      return [...clone.childNodes]
-        .map(child => child.textContent ?? "")
-        .join("\n")
-        .trimStart();
-    }, undefined, { timeout: 20_000, signal: abortSignal });
+    return (await composer.evaluate(chatGptImageComposerState, undefined, { timeout: 20_000, signal: abortSignal })).promptText;
   }
 
   private async assertPromptAttached(
@@ -3793,6 +3813,44 @@ export class ChatGptBrowserWorker {
     }
   }
 
+  private async newImageToolIsSelected(composer: Locator, abortSignal?: AbortSignal): Promise<boolean> {
+    return (await composer.evaluate(chatGptImageComposerState,
+      undefined, { timeout: 2_000, signal: abortSignal })).selected;
+  }
+
+  private async prepareNewImageTool(
+    page: Page, composer: Locator, captureDiagnostic?: (checkpoint: string) => Promise<void>, abortSignal?: AbortSignal,
+  ): Promise<Locator> {
+    throwIfPromptAttachmentAborted(abortSignal);
+    if (!this.config.useSavedChats || !this.config.chatgptProjectUrl) throw new Error("image_new_requires_project");
+    if (await this.newImageToolIsSelected(composer, abortSignal)) return composer;
+    const actions = { timeout: 5_000, signal: abortSignal };
+    const addFiles = composer.locator("xpath=ancestor::form[1]")
+      .getByRole("button", { name: "Add files and more", exact: true }).filter({ visible: true });
+    if (await addFiles.count() !== 1 || !await addFiles.first().isEnabled(actions)) {
+      throw new Error("image_new_tool_entry_missing: Add files and more");
+    }
+    await addFiles.first().click(actions);
+    const createImage = page.getByRole("button", { name: /^Create image(?:\s+Visualize anything)?$/ }).filter({ visible: true });
+    if (await createImage.count() !== 1 || !await createImage.first().isEnabled(actions)) {
+      throw new Error("image_new_tool_entry_missing: Create image");
+    }
+    await createImage.first().click(actions);
+    const selectedComposer = await this.activeComposer(page, 5_000, abortSignal);
+    if (!await this.newImageToolIsSelected(selectedComposer, abortSignal)) {
+      throw new Error("image_new_tool_selection_unconfirmed");
+    }
+    await captureDiagnostic?.("new-image-tool-selected");
+    return selectedComposer;
+  }
+
+  private async assertNewImageToolSelected(page: Page, output?: ChatGptImageOutputOptions, abortSignal?: AbortSignal): Promise<void> {
+    if (output?.operation !== "new") return;
+    throwIfPromptAttachmentAborted(abortSignal);
+    const composer = await this.activeComposer(page, 5_000, abortSignal);
+    if (!await this.newImageToolIsSelected(composer, abortSignal)) throw new Error("image_new_tool_selection_unconfirmed");
+  }
+
   private async attachPrompt(
     page: Page,
     prompt: string,
@@ -3802,6 +3860,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
     requireThink = false,
+    imageOutput?: ChatGptImageOutputOptions,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
     await throwIfChatGptRateLimitDialog(page);
@@ -3812,7 +3871,7 @@ export class ChatGptBrowserWorker {
     let composerMutationStarted = false;
     try {
       if (!localTools) {
-        const composer = await this.activeComposer(page, 30_000, abortSignal);
+        let composer = await this.activeComposer(page, 30_000, abortSignal);
         // Playwright's multiline fill maps through an input action that ChatGPT's Lexical editor can
         // collapse to the first paragraph on the launcher-owned Electron surface. Clear separately,
         // then transport the complete text through the browser's plain-text editing command.
@@ -3822,8 +3881,12 @@ export class ChatGptBrowserWorker {
         if (requireThink) {
           await setChatGptThinkMode(composer, true, captureDiagnostic, abortSignal);
         }
+        if (imageOutput?.operation === "new") {
+          composer = await this.prepareNewImageTool(page, composer, captureDiagnostic, abortSignal);
+        }
         await this.insertPromptText(page, prompt, abortSignal);
         await this.assertPromptAttached(page, prompt, abortSignal);
+        if (imageOutput?.operation === "new") await this.assertNewImageToolSelected(page, imageOutput, abortSignal);
         return;
       }
       if (requireThink) {
@@ -4125,6 +4188,7 @@ export class ChatGptBrowserWorker {
     catalogRefreshAvailable = false,
     connectorAttemptBudget?: ChatGptConnectorAttemptBudget,
     requireThink = false,
+    imageOutput?: ChatGptImageOutputOptions,
   ): Promise<void> {
     let retryAvailable = compaction;
     for (;;) {
@@ -4138,6 +4202,7 @@ export class ChatGptBrowserWorker {
           catalogRefreshAvailable,
           connectorAttemptBudget,
           requireThink,
+          imageOutput,
         );
         return;
       } catch (error) {
@@ -4286,6 +4351,7 @@ export class ChatGptBrowserWorker {
   private async responseDomSnapshot(
     responseTurn: Locator,
     cache?: ChatGptResponseDomCache,
+    imageOutput?: ChatGptImageOutputOptions,
   ): Promise<ChatGptResponseDomSnapshot> {
     const observed = await responseTurn.evaluate((element, options) => {
       const root = element as HTMLElement;
@@ -4887,7 +4953,7 @@ export class ChatGptBrowserWorker {
       }
       return absentResponseDomSnapshot();
     }
-    const snapshot = observed.snapshot ?? cache?.snapshot ?? absentResponseDomSnapshot();
+    const snapshot: ChatGptResponseDomSnapshot = observed.snapshot ?? cache?.snapshot ?? absentResponseDomSnapshot();
     if (observed.snapshot && cache) {
       cache.key = observed.key;
       cache.snapshot = observed.snapshot;
@@ -4898,6 +4964,11 @@ export class ChatGptBrowserWorker {
     snapshot.traceBlocks = snapshot.traceBlocks
       .map(stripChatGptTraceControlSuffix)
       .filter(block => block.text.length > 0 && !isChatGptTraceControl(block));
+    if (imageOutput && snapshot.responsePresent) {
+      const images = await inspectChatGptAssistantImages(responseTurn, imageOutput);
+      snapshot.imageReady = images.readyCount > 0;
+      snapshot.imageFailureUiVisible = images.failureUiVisible;
+    }
     return snapshot;
   }
 
@@ -5549,6 +5620,7 @@ export class ChatGptBrowserWorker {
                 catalogRefreshAvailable,
                 connectorAttemptBudget,
                 mode.thinkEnabled,
+                turn.imageOutput,
               );
             },
             chatGptSuspensionClock,
@@ -5610,6 +5682,7 @@ export class ChatGptBrowserWorker {
             return turn.onSubmitted?.();
           }, onSendActivated: async () => {
             await this.assertSelectedEffort(page, mode);
+            if (turn.imageOutput?.operation === "new") await this.assertNewImageToolSelected(page, turn.imageOutput, turn.abortSignal);
             submissionRejection.begin(page);
             await turn.onSendActivated?.();
           } },
@@ -5732,7 +5805,7 @@ export class ChatGptBrowserWorker {
           responseDomCache.key = undefined;
           responseDomCache.snapshot = undefined;
         }
-        let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+        let snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache, turn.imageOutput);
         if (!snapshot.responsePresent) {
           try {
             const rebound = await withChatGptBrowserObservationTimeout(
@@ -5747,7 +5820,7 @@ export class ChatGptBrowserWorker {
               responseTurn = rebound;
               responseDomCache.key = undefined;
               responseDomCache.snapshot = undefined;
-              snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache);
+              snapshot = await this.responseDomSnapshot(responseTurn.locator, responseDomCache, turn.imageOutput);
             }
           } catch (error) {
             if (!(error instanceof ChatGptBrowserObservationTimeoutError) || !launcherSurfaceId) throw error;
@@ -5810,6 +5883,12 @@ export class ChatGptBrowserWorker {
         const running = await stop.isVisible().catch(() => false);
         if (running) sawRunning = true;
         if (snapshot.responsePresent) {
+          if (turn.imageOutput && !running && snapshot.completionActionVisible
+            && snapshot.imageFailureUiVisible && !snapshot.imageReady) {
+            // A terminal failure widget can have no assistant prose. Use a fresh capture
+            // observation to classify it rather than waiting for nonexistent Markdown.
+            await captureChatGptAssistantImages(responseTurn.locator, turn.traceId, turn.imageOutput);
+          }
           if (!capturedResponse) {
             capturedResponse = true;
             await diagnostics.capture(page, "response-visible");

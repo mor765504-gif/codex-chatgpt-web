@@ -15,6 +15,8 @@ const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 const TASK_ID = /^[A-Za-z0-9_-]{6,128}$/;
 
 export interface ChatGptImageOutputOptions {
+  /** Explicit UI preparation intent; not a claimed backend image-tool parameter. */
+  operation?: "new" | "edit";
   /** Local directory. Keep outside repository and other public locations. */
   outputDir: string;
   maxImages?: number;
@@ -38,7 +40,29 @@ export interface ChatGptImageArtifact {
   turnId: string;
 }
 
-function optionsOf(value: ChatGptImageOutputOptions): Required<ChatGptImageOutputOptions> {
+export interface ChatGptImageObservation {
+  assistantImageCount: number;
+  galleryImageCount: number;
+  excludedReferenceCount: number;
+  candidateCount: number;
+  readyCount: number;
+  failureUiVisible: boolean;
+  /** Bounded metadata only; no URLs, text, pixels, or configuration. */
+  images: { complete: boolean; width: number; height: number }[];
+}
+
+export class ChatGptImageOutputError extends Error {
+  constructor(
+    readonly code: "image_output_provider_failed" | "image_output_completed_without_image" | "image_output_capture_failed",
+    readonly observation: ChatGptImageObservation,
+    readonly detail?: string,
+  ) {
+    super(`${code}: ${JSON.stringify({ ...observation, ...(detail ? { detail } : {}) })}`);
+    this.name = "ChatGptImageOutputError";
+  }
+}
+
+function optionsOf(value: ChatGptImageOutputOptions): Required<Omit<ChatGptImageOutputOptions, "operation">> {
   if (!value.outputDir || typeof value.outputDir !== "string") throw new Error("image_output_invalid_directory");
   const maxImages = value.maxImages ?? 4;
   const minWidth = value.minWidth ?? 512;
@@ -129,43 +153,66 @@ export function persistChatGptImagePayloads(
   return artifacts;
 }
 
-/**
- * The response locator must already be tied to the accepted assistant turn identity.
- * Only fetches image resources ordinarily readable in that page origin. On inaccessible
- * CDN URLs, fails explicitly instead of circumventing browser restrictions.
- */
-export async function captureChatGptAssistantImages(
-  responseTurn: Locator,
-  turnId: string,
-  output: ChatGptImageOutputOptions,
-): Promise<ChatGptImageArtifact[]> {
-  const cfg = optionsOf(output);
-  const payloads = await responseTurn.evaluate(async (element, selection) => {
-    const candidates = [...element.querySelectorAll<HTMLImageElement>("img")]
-      // A turn-key group can contain BOTH the submitted user image and assistant output.
-      // Never mistake the reference image for a freshly generated assistant image.
-      .filter(img => (
-        (img.closest('[data-conversation-role="assistant"], [data-message-author-role="assistant"]')
-          || img.closest('[data-testid="generated-image-gallery"], [data-testid="generated-image-preview"]'))
-        && !img.closest('[data-conversation-role="user"], [data-message-author-role="user"], [data-user-message-bubble]')
-        && img.complete && img.naturalWidth >= selection.minWidth
-        && img.naturalHeight >= selection.minHeight && img.isConnected
-      ))
-      .sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight)
-      .slice(0, selection.maxImages);
+/** Self-contained page callback, shared by readiness and terminal capture. */
+async function readAssistantImageState(element: Element, selection: {
+  minWidth: number; minHeight: number; maxImages: number; maxBytes: number; capture: boolean;
+}): Promise<{ observation: ChatGptImageObservation; payloads: ChatGptImagePayload[]; captureError?: string }> {
+    const assistant = '[data-conversation-role="assistant"], [data-message-author-role="assistant"]';
+    const gallery = '[data-testid="generated-image-gallery"], [data-testid="generated-image-preview"]';
+    const user = '[data-conversation-role="user"], [data-message-author-role="user"], [data-user-message-bubble]';
+    const markdown = '.markdown, [data-markdown-text-style="assistant-message"]';
+    const visible = (node: Element): boolean => {
+      if (!node.isConnected) return false;
+      for (let parent: Element | null = node; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (parent.hasAttribute("hidden") || style.display === "none"
+          || style.visibility === "hidden" || style.opacity === "0") return false;
+      }
+      return true;
+    };
+    const all = Array.from(element.querySelectorAll<HTMLImageElement>("img"));
+    const inputSources = new Set(all.filter(img => !!img.closest(user))
+      .map(img => img.currentSrc || img.src).filter(Boolean));
+    const isReference = (img: HTMLImageElement): boolean => !!img.closest(user)
+      || inputSources.has(img.currentSrc || img.src)
+      || !!img.closest("blockquote, pre, code")
+      // Ordinary Markdown images can quote existing sources. Explicit generated widgets
+      // remain eligible even when their renderer is nested within Markdown.
+      || (!!img.closest(markdown) && !img.closest(gallery));
+    const candidates = all.filter(img => !isReference(img)
+      && !!(img.closest(assistant) || img.closest(gallery)) && visible(img));
+    const ready = candidates.filter(img => img.complete && img.naturalWidth >= selection.minWidth
+      && img.naturalHeight >= selection.minHeight)
+      .sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight);
+    // Only the observed exact UI label outside model/user prose is evidence of tool failure.
+    // This does not infer a backend mode or trust the assistant's explanation of that mode.
+    const failureUiVisible = Array.from(element.querySelectorAll<HTMLElement>("*"))
+      .some(node => !node.closest(`${user}, ${markdown}, blockquote, pre, code, script, style`)
+        && visible(node) && (node.getAttribute("aria-label")
+          || Array.from(node.childNodes).filter(child => child.nodeType === 3).map(child => child.textContent || "").join(""))
+          .replace(/\s+/g, " ").trim() === "Image generation failed");
+    const observation: ChatGptImageObservation = {
+      assistantImageCount: all.filter(img => !!img.closest(assistant) && !img.closest(user)).length,
+      galleryImageCount: all.filter(img => !!img.closest(gallery) && !img.closest(user)).length,
+      excludedReferenceCount: all.filter(isReference).length,
+      candidateCount: candidates.length, readyCount: ready.length, failureUiVisible,
+      images: candidates.slice(0, 8).map(img => ({complete:img.complete, width:img.naturalWidth, height:img.naturalHeight})),
+    };
     const results: ChatGptImagePayload[] = [];
-    for (const candidate of candidates) {
+    if (!selection.capture) return { observation, payloads: results };
+    for (const candidate of ready.slice(0, selection.maxImages)) {
       const src = candidate.currentSrc || candidate.src;
       if (!/^(blob:|data:image\/|https:\/\/)/.test(src)) continue;
       let imageResponse: Response;
       try {
         imageResponse = await fetch(src, { credentials: "same-origin" });
       } catch {
-        throw new Error("image_output_not_readable_by_page");
+        return { observation, payloads: [], captureError: "image_output_not_readable_by_page" };
       }
-      if (!imageResponse.ok) throw new Error("image_output_fetch_failed");
+      if (!imageResponse.ok) return { observation, payloads: [], captureError: "image_output_fetch_failed" };
+      try {
       const blob = await imageResponse.blob();
-      if (blob.size > selection.maxBytes) throw new Error("image_output_too_large");
+      if (blob.size > selection.maxBytes) return { observation, payloads: [], captureError: "image_output_too_large" };
       const base64 = await new Promise<string>((resolveBase64, rejectBase64) => {
         const reader = new FileReader();
         reader.onerror = () => rejectBase64(new Error("image_output_blob_read_failed"));
@@ -178,9 +225,38 @@ export async function captureChatGptAssistantImages(
         reader.readAsDataURL(blob);
       });
       results.push({ base64, width: candidate.naturalWidth, height: candidate.naturalHeight });
+      } catch {
+        return { observation, payloads: [], captureError: "image_output_blob_read_failed" };
+      }
     }
-    return results;
-  }, { minWidth: cfg.minWidth, minHeight: cfg.minHeight, maxImages: cfg.maxImages, maxBytes: MAX_IMAGE_BYTES });
+    return { observation, payloads: results };
+}
+
+function imageSelection(output: ChatGptImageOutputOptions, capture: boolean) {
+  const cfg = optionsOf(output);
+  return { minWidth: cfg.minWidth, minHeight: cfg.minHeight, maxImages: cfg.maxImages, maxBytes: MAX_IMAGE_BYTES, capture };
+}
+
+export async function inspectChatGptAssistantImages(
+  responseTurn: Locator, output: ChatGptImageOutputOptions,
+): Promise<ChatGptImageObservation> {
+  return (await responseTurn.evaluate(readAssistantImageState, imageSelection(output, false), { timeout: 2_000 })).observation;
+}
+
+/** Bound current turn only. Classify before persistence; never retry or bypass page access. */
+export async function captureChatGptAssistantImages(
+  responseTurn: Locator,
+  turnId: string,
+  output: ChatGptImageOutputOptions,
+): Promise<ChatGptImageArtifact[]> {
+  const cfg = optionsOf(output);
+  const { observation, payloads, captureError } = await responseTurn.evaluate(readAssistantImageState, imageSelection(cfg, true));
+  if (captureError || payloads.length === 0) {
+    const code = observation.failureUiVisible ? "image_output_provider_failed"
+      : observation.candidateCount > 0 ? "image_output_capture_failed" : "image_output_completed_without_image";
+    throw new ChatGptImageOutputError(code, observation, captureError);
+  }
+  // Persistence/replay errors retain their own codes; they are not provider failures.
   return persistChatGptImagePayloads(turnId, payloads, cfg);
 }
 
