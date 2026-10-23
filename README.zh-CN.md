@@ -24,9 +24,15 @@
   <a href="#get-started">开始使用</a> · <a href="https://github.com/miuuyy/codex-chatgpt-web/releases">更新内容</a> · <a href="docs/architecture.md">架构</a> · <a href="TROUBLESHOOTING.md">故障排除</a>
 </p>
 
-在 Codex 原生模型选择器中使用账户可用的 ChatGPT 网页版模型，包括 Pro。使用 ChatGPT 网页版的独立额度，不消耗 Work 或 Codex 额度。保留原有的界面、任务、图片和流式输出。
+在 Codex 原生模型选择器中使用账户可用的 ChatGPT 网页版模型，包括 Pro。使用 ChatGPT 网页版的独立额度，不消耗 Work 或 Codex 额度。保留原有的界面、任务、输入图片附件和流式输出。
 
 完整 harness 模式通过 MCP 将 ChatGPT 连接到当前任务的文件、终端、工具和审批流程。对话始终关联到你的 Codex 任务，上下文增长时也能继续工作。
+
+## 当前源码状态
+
+此检出保留上游发布和更新通道；下载的安装包与本地源码修改是不同身份。
+[当前源码状态](docs/ASSET_STATUS.md)列出实现边界与验证口径。工作流定义和历史发布记录
+不能证明当前安装的 Codex 已完成真实工具轮次。
 
 <div id="get-started"><a id="quick-start"></a></div>
 
@@ -39,7 +45,7 @@
 3. **安装模型**：重启一次 Codex。在自动模式下，选择名称以 **(Web)** 结尾的模型。Pro 版本使用独立条目，Sol 推理等级通过 Effort 选择。Zero Risk 保留专用条目。
 4. **需要使用工具编程时**：打开启动器中的 **MCP**，完成下方的完整 harness 设置。
 
-应用已包含浏览器和运行时，无需另外安装 Chrome、Node 或 Bun。
+应用已包含浏览器和运行时，普通内嵌登录无需另外安装 Chrome、Node 或 Bun。可选的 macOS 通行密钥流程需要 Google Chrome，并使用专用临时配置；见[登录排查](TROUBLESHOOTING.md#chatgpt-sign-in-does-not-complete)。
 
 <details>
 <summary><strong>命令行安装、更新与修复</strong></summary>
@@ -89,7 +95,10 @@ Zero Risk 不读取或操作 ChatGPT 页面。请自行选择模型和 `Codex Ze
 > 有关 **GPT-5.6 Sol Pro** 和 **GPT-6 Astra** 当前的 ChatGPT 消息额度，请参阅
 > [Limits](https://github.com/miuuyy/codex-chatgpt-web/discussions/309)。Token 上下文上限取决于
 > 账户类型和所选 effort。Plus 的 Medium/High 使用实测的 90,000-token 窗口；启用实验性的
-> **3× context** 后最高为 270,000 tokens，并且全程支持原生 Codex compaction。
+> **3× context** 后，GPT-5.6 最高为 270,000 tokens，并支持原生 Codex compaction。
+> GPT-6 Sol 在 Pro 账户的 Medium、High 和 Extra High 下使用独立的 240,000-token
+> 预算及 220,000-token 压缩阈值；Instant 和其他账户计划使用标准预算。
+> 这些是适配器的预算分支，实际模型可用性仍取决于账户和工作区。
 
 1. 完成启动器中的必需设置。
 2. 在启动器中打开 **MCP**。请在将使用 ChatGPT 连接器的同一个 OpenAI 账户中创建 Tunnel
@@ -113,7 +122,9 @@ Zero Risk 不读取或操作 ChatGPT 页面。请自行选择模型和 `Codex Ze
 
 <a id="operations"></a>
 
-使用 **活动** 页面查看安全的本地诊断，并通过 **设置 → 运行诊断** 执行端到端健康检查。设置页还可
+使用 **活动** 页面查看安全的本地诊断，并通过 **设置 → 运行诊断** 检查本地集成与运行时健康。
+诊断不能证明 ChatGPT 连接器已附着或真实工具轮次已完成；这些结论需单独通过
+[发布验证](docs/release-validation.md)。设置页还可
 取消保留的浏览器任务，或在卸载前移除 Codex 集成。仅在需要为每个浏览器检查点保存截图时设置
 `CODEX_CHATGPT_WEB_BROWSER_DIAGNOSTICS=1`。
 
