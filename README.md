@@ -24,9 +24,16 @@
   <a href="#get-started">Get started</a> · <a href="https://github.com/miuuyy/codex-chatgpt-web/releases">What’s new</a> · <a href="docs/architecture.md">Architecture</a> · <a href="TROUBLESHOOTING.md">Troubleshooting</a>
 </p>
 
-Use the ChatGPT Web models available on your account, including Pro, from Codex’s native model picker—with ChatGPT Web’s separate usage limits, without spending your Work or Codex quota. Keep the same interface, tasks, images, and streaming.
+Use the ChatGPT Web models available on your account, including Pro, from Codex’s native model picker—with ChatGPT Web’s separate usage limits, without spending your Work or Codex quota. Keep the same interface, tasks, input image attachments, and streaming.
 
 Full harness mode connects ChatGPT to the current task’s files, terminal, tools, and approvals through MCP. Conversations stay tied to your Codex task, so you can keep working as the context grows.
+
+## Current source status
+
+This checkout retains the upstream release and update channel; downloaded packages and local
+source changes have separate identities. See [Current source status](docs/ASSET_STATUS.md) for
+implemented boundaries and validation scope. Workflow definitions and historical release notes do
+not certify a current installed Codex turn.
 
 <div id="get-started"><a id="quick-start"></a></div>
 
@@ -39,7 +46,7 @@ Full harness mode connects ChatGPT to the current task’s files, terminal, tool
 3. **Install models** and restart Codex once. In automatic mode, choose a model ending in **(Web)**. Pro versions have separate entries; Sol reasoning is selected through Effort. Zero Risk keeps its dedicated entry.
 4. **For coding with tools**, open **MCP** in the launcher and complete the Full harness setup below.
 
-The app includes its browser and runtime. No separate Chrome, Node, or Bun installation is needed.
+The app includes its browser and runtime. Ordinary embedded sign-in needs no separate Chrome, Node, or Bun installation. The optional macOS passkey flow requires Google Chrome and uses a dedicated temporary profile; see [Troubleshooting](TROUBLESHOOTING.md#chatgpt-sign-in-does-not-complete).
 
 <details>
 <summary><strong>Terminal install, updates & repair</strong></summary>
@@ -117,7 +124,9 @@ that option clicks **Allow once**, never a permanent grant.
 
 <a id="operations"></a>
 
-Use **Activity** for safe local diagnostics and **Settings → Run doctor** for end-to-end health.
+Use **Activity** for safe local diagnostics and **Settings → Run doctor** for local integration and runtime health.
+Doctor cannot prove that the ChatGPT connector is attached or that a real tool turn completes;
+use the separate [release validation](docs/release-validation.md) gates for those claims.
 Settings can also cancel a retained browser turn or remove the Codex integration before uninstall.
 **Save chats in ChatGPT** keeps task conversations in ChatGPT history. Off by default; independent of **New browser chat for each turn**.
 Set `CODEX_CHATGPT_WEB_BROWSER_DIAGNOSTICS=1` only when every browser checkpoint needs a screenshot.
